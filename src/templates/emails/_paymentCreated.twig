@@ -1,0 +1,35 @@
+{# ======================= #}
+{# PROPERTIES              #}
+{# ======================= #}
+{% extends "qr-payments/emails/_layout" %}
+
+{# @var payment \digitalastronaut\craftqrpayments\elements\Payment #}
+
+{# ======================= #}
+{# TEMPLATE                #}
+{# ======================= #}
+{% block content %}
+    <h2 style="{{ heading2Style }}">Hello,</h2>
+
+    <p style="{{ textStyle }}" style="margin: 0 0 24px 0; line-height: 1.5;">
+        {{ "A payment request for"|t }} {{ payment.amount|money }} {{ "has been created for you. Scan the QR code below with your banking app to pay instantly:"|t }}
+    </p>
+
+    <img src="{{ qrContentId }}" alt="Payment QR code">
+
+    <hr style="{{ dividerStyle }}">
+
+    <p style="{{ textStyle }}">{{ "If you can't scan the code, you can also make a manual bank transfer using these details:"|t }}</p>
+
+    <ul>
+        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Beneficiary:"|t }}</span>{{ payment.beneficiaryName }}</li>
+        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "IBAN:"|t }}</span>{{ payment.iban }}</li>
+        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "BIC:"|t }}</span>{{ payment.bic }}</li>
+        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Amount:"|t }}</span>{{ payment.amount|money }}</li>
+        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Reference:"|t }}</span>{{ payment.remittanceReference }}</li>
+        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Due date:"|t }}</span>{{ payment.dueDate|date('Y-m-d') }}</li>
+    </ul>
+
+    <p>{{ "Please make sure to use the reference above so we can match your payment to your order."|t }}</p>
+{% endblock %}
+

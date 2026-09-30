@@ -1,0 +1,335 @@
+<?php
+/**
+ * QR payments plugin for Craft CMS
+ *
+ * Generates EPC QR code SEPA payment requests and lets the site owner
+ * manually track and reconcile payment status from the control panel.
+ *
+ * @link      https://digitalastronaut.be
+ * @copyright Copyright (c) 2026 Digitalastronaut
+ */
+
+namespace digitalastronaut\craftqrpayments\controllers;
+
+use Craft;
+use craft\elements\User;
+use craft\helpers\DateTimeHelper;
+use craft\helpers\Localization;
+use craft\helpers\UrlHelper;
+use craft\web\Controller;
+use craft\web\Response;
+use craft\web\View;
+
+use digitalastronaut\craftqrpayments\elements\Payment;
+use digitalastronaut\craftqrpayments\QrPayments;
+use digitalastronaut\craftqrpayments\web\assets\frontend\FrontendAssetBundle;
+
+use DateTime;
+use Throwable;
+use yii\web\BadRequestHttpException;
+use yii\web\ForbiddenHttpException;
+use yii\web\NotFoundHttpException;
+
+/**
+ * Class PaymentsController
+ *
+ * @author      Digitalastronaut
+ * @package     QrPayments
+ * @since       v1.0.0-beta
+ */
+class PaymentsController extends Controller {
+    public $defaultAction = 'index';
+    protected array|int|bool $allowAnonymous = ['request', 'pay'];
+
+    /**
+     * @return Response
+     */
+    public function actionIndex(): Response {
+        $this->requirePermission('qr-payments:access-payments');
+
+        return $this->renderTemplate('qr-payments/pages/_paymentHistory.twig');
+    }
+
+    /**
+     * @param float|null $amount
+     * @param string|null $email
+     * @return Response
+     */
+    public function actionCreate(?float $amount = null, ?string $email = null): Response {
+        $this->requirePermission('qr-payments:access-payments');
+
+        return $this->renderTemplate('qr-payments/pages/_createPayment.twig', [
+            'amount' => $amount,
+            'email' => $email,
+            'payment' => new Payment(),
+            'fieldLayout' => Payment::getCustomFieldLayout(),
+            'settings' => QrPayments::getInstance()->getSettings(),
+        ]);
+    }
+
+    /**
+     * @return Response|null
+     */
+    public function actionSave(): ?Response {
+        $this->requirePermission('qr-payments:access-payments');
+        $this->requirePostRequest();
+
+        $amount = $this->amountFromRequest();
+        $email = $this->request->getRequiredBodyParam('email');
+        $dueDate = $this->dueDateFromRequest();
+
+        try {
+            $payment = QrPayments::getInstance()->getPayments()->createPayment($amount, $email, $dueDate);
+        } catch (Throwable $error) {
+            Craft::error($error->getMessage(), __METHOD__);
+
+            $this->setFailFlash($error->getMessage());
+
+            Craft::$app->getUrlManager()->setRouteParams(['amount' => $amount, 'email' => $email]);
+
+            return null;
+        }
+
+        $this->setSuccessFlash(Craft::t('qr-payments', 'Payment created.'));
+
+        return $this->redirect($payment->getCpEditUrl());
+    }
+
+    /**
+     * @return Response|null
+     * @throws NotFoundHttpException
+     * @throws ForbiddenHttpException
+     */
+    public function actionMarkAsPaid(): ?Response {
+        $this->requirePostRequest();
+        $this->requirePermission('qr-payments:access-payments');
+
+        $payment = $this->paymentById((int) $this->request->getRequiredBodyParam('elementId'));
+        $user = $this->userAuthorizedToSave($payment);
+        $redirect = $payment->getCpEditUrl();
+
+        $payment->pushStatusHistoryEntry(Payment::HISTORY_TYPE_PAYMENT, $payment->getAmount(), $user->id);
+
+        if (!Craft::$app->getElements()->saveElement($payment)) {
+            $message = $payment->getFirstError('statusHistory') ?? Craft::t('qr-payments', 'Couldn’t mark the payment as paid.');
+
+            return $this->asFailure($message);
+        }
+
+        return $this->asSuccess(Craft::t('qr-payments', 'Payment marked as paid.'), redirect: $redirect);
+    }
+
+    /**
+     * @param int $elementId
+     * @param string $type One of the HISTORY_TYPE_* constants.
+     * @return Response
+     * @throws BadRequestHttpException
+     * @throws NotFoundHttpException
+     * @throws ForbiddenHttpException
+     */
+    public function actionHistoryEntryModal(int $elementId, string $type): Response {
+        $this->requirePermission('qr-payments:access-payments');
+
+        $historyTypes = Payment::historyTypes();
+
+        if (!isset($historyTypes[$type])) throw new BadRequestHttpException('Invalid history entry type.');
+
+        $payment = $this->paymentById($elementId);
+        $this->userAuthorizedToSave($payment);
+
+        $labels = [
+            Payment::HISTORY_TYPE_PAYMENT => Craft::t('qr-payments', 'Add payment'),
+            Payment::HISTORY_TYPE_REFUND => Craft::t('qr-payments', 'Refund'),
+            Payment::HISTORY_TYPE_CANCELLATION => Craft::t('qr-payments', 'Cancel payment'),
+        ];
+
+        return $this->asCpModal()
+            ->action('qr-payments/payments/save-history-entry')
+            ->submitButtonLabel($labels[$type])
+            ->formAttributes(['class' => ['qrp-history-entry-modal']])
+            ->contentTemplate('qr-payments/components/_historyEntryForm.twig', [
+                'elementId' => $payment->id,
+                'type' => $type,
+                'title' => $labels[$type],
+                'showAmount' => $type !== Payment::HISTORY_TYPE_CANCELLATION,
+            ]);
+    }
+
+    /**
+     * @return Response|null
+     * @throws BadRequestHttpException
+     * @throws NotFoundHttpException
+     * @throws ForbiddenHttpException
+     */
+    public function actionSaveHistoryEntry(): ?Response {
+        $this->requirePostRequest();
+        $this->requirePermission('qr-payments:access-payments');
+
+        $type = (string) $this->request->getRequiredBodyParam('type');
+        $historyTypes = Payment::historyTypes();
+
+        if (!isset($historyTypes[$type])) {
+            throw new BadRequestHttpException('Invalid history entry type.');
+        }
+
+        $payment = $this->paymentById((int) $this->request->getRequiredBodyParam('elementId'));
+        $user = $this->userAuthorizedToSave($payment);
+
+        $amount = null;
+
+        if ($type !== Payment::HISTORY_TYPE_CANCELLATION) {
+            $amount = Payment::parseMoney($this->request->getBodyParam('amount'));
+
+            if ($amount === null || !$amount->isPositive()) {
+                return $this->asFailure(Craft::t('qr-payments', 'Please enter an amount greater than 0.'));
+            }
+        }
+
+        $note = trim((string) $this->request->getBodyParam('note', ''));
+
+        $payment->pushStatusHistoryEntry($type, $amount, $user->id, $note !== '' ? $note : null);
+
+        if (!Craft::$app->getElements()->saveElement($payment)) {
+            $message = $payment->getFirstError('statusHistory') ?? Craft::t('qr-payments', 'Couldn’t save the payment.');
+
+            return $this->asFailure($message);
+        }
+
+        return $this->asSuccess(Craft::t('qr-payments', 'Payment updated.'));
+    }
+
+    /**
+     * @return Response|null
+     */
+    public function actionRequest(): ?Response {
+        $this->requirePostRequest();
+
+        $amount = $this->hashedAmountFromRequest();
+        if ($amount === null) return $this->asFailure(Craft::t('qr-payments', 'Invalid amount.'));
+
+        $email = $this->request->getBodyParam('email', '');
+        if (!$email) return $this->asFailure(Craft::t('qr-payments', 'Email is required.'));
+
+        try {
+            $payment = QrPayments::getInstance()->getPayments()->createPayment($amount, $email);
+        } catch (Throwable $error) {
+            Craft::error($error->getMessage(), __METHOD__);
+
+            return $this->asFailure(Craft::t('qr-payments', 'Could not create the payment.'));
+        }
+
+        $route = QrPayments::getInstance()->getSettings()->paymentRoute;
+
+        return $this->redirect(UrlHelper::siteUrl("{$route}/{$payment->uid}/pay"));
+    }
+
+    /**
+     * @param string $uid
+     * @return Response
+     * @throws NotFoundHttpException
+     */
+    public function actionPay(string $uid): Response {
+        $payment = $this->paymentByUid($uid);
+
+        [$template, $variables, $mode] = $this->payTemplateVariables($payment);
+
+        return $this->renderTemplate($template, $variables, $mode);
+    }
+
+    /**
+     * @param Payment $payment
+     * @return array{0: string, 1: array, 2: string}
+     */
+    private function payTemplateVariables(Payment $payment): array {
+        Craft::$app->view->registerAssetBundle(FrontendAssetBundle::class);
+        QrPayments::getInstance()->getVite()->register('src/web/assets/frontend/frontend.js');
+
+        $settings = QrPayments::getInstance()->getSettings();
+
+        $variables = [
+            'payment' => $payment,
+            'qrCodeDataUri' => $payment->getQrCodeDataUri(),
+        ];
+
+        $override = $settings->payTemplate;
+
+        if ($override !== '') return [$override, $variables, View::TEMPLATE_MODE_SITE];
+
+        return ['qr-payments/components/_pay.twig', $variables, View::TEMPLATE_MODE_CP];
+    }
+
+    /**
+     * @return float
+     */
+    private function amountFromRequest(): float {
+        $posted = $this->request->getRequiredBodyParam('amount');
+
+        if (!\is_array($posted)) return (float) $posted;
+
+        return (float) Localization::normalizeNumber($posted['value'] ?? '', $posted['locale'] ?? null);
+    }
+
+    /**
+     * @return DateTime|null
+     */
+    private function dueDateFromRequest(): ?DateTime {
+        $posted = $this->request->getBodyParam('dueDate');
+
+        if (!$posted) return null;
+
+        return DateTimeHelper::toDateTime($posted) ?: null;
+    }
+
+    /**
+     * @return float|null
+     */
+    private function hashedAmountFromRequest(): ?float {
+        $hashed = (string) $this->request->getBodyParam('amount', '');
+        $raw = $hashed !== '' ? Craft::$app->getSecurity()->validateData($hashed) : false;
+
+        if ($raw === false || !is_numeric($raw)) return null;
+
+        return (float) $raw;
+    }
+
+    /**
+     * @param string $uid
+     * @return Payment
+     * @throws NotFoundHttpException
+     */
+    private function paymentByUid(string $uid): Payment {
+        $payment = Payment::find()->uid($uid)->status(null)->one();
+
+        if (!$payment instanceof Payment) throw new NotFoundHttpException('Payment not found');
+
+        return $payment;
+    }
+
+    /**
+     * @param int $id
+     * @return Payment
+     * @throws NotFoundHttpException
+     */
+    private function paymentById(int $id): Payment {
+        $payment = Payment::find()->id($id)->status(null)->one();
+
+        if (!$payment instanceof Payment) throw new NotFoundHttpException('Payment not found');
+
+        return $payment;
+    }
+
+    /**
+     * @param Payment $payment
+     * @return User
+     * @throws ForbiddenHttpException
+     */
+    private function userAuthorizedToSave(Payment $payment): User {
+        $user = static::currentUser();
+
+        if ($user === null || !$payment->canSave($user)) {
+            throw new ForbiddenHttpException('User not authorized to save this payment.');
+        }
+
+        return $user;
+    }
+}

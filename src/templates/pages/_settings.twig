@@ -1,0 +1,220 @@
+{# @var plugin \digitalastronaut\craftqrpayments\QrPayments #}
+{# @var settings \digitalastronaut\craftqrpayments\models\Settings #}
+
+{% extends "_layouts/cp.twig" %}
+
+{% import '_includes/forms.twig' as forms %}
+
+{% set fullPageForm = true %}
+{% set title = "Settings"|t('qr-payments') %}
+{% set selectedSubnavItem = 'settings' %}
+
+{% set crumbs = [
+    { label: 'QR payments'|t('qr-payments'), url: url('qr-payments') },
+    { label: 'Settings'|t('qr-payments'), url: url('qr-payments/settings') },
+] %}
+
+{% set allowAdminChanges = craft.app.config.general.allowAdminChanges %}
+
+{% set tabs = {
+    general: { label: 'General'|t('qr-payments'), url: '#general' },
+    paymentFields: { label: 'Payment fields'|t('qr-payments'), url: '#paymentFields' },
+    paymentPage: { label: 'Payment page'|t('qr-payments'), url: '#paymentPage' },
+    notificationSettings: { label: 'Notifications'|t('qr-payments'), url: '#notificationSettings' },
+    emails: { label: 'Emails'|t('qr-payments'), url: '#emails' },
+} %}
+
+{% set selectedTab = selectedTab|default('general') %}
+
+{% block content %}
+    {{ actionInput('qr-payments/settings/save') }}
+    {{ redirectInput('qr-payments/settings') }}
+
+    <div id="general" class="{{ selectedTab != 'general' ? 'hidden' : '' }}">
+        <div class="flex-fields">
+            {{ forms.textField({
+                label: 'Plugin name'|t('qr-payments'),
+                instructions: 'Overrides the label shown for this plugin in the control panel.'|t('qr-payments'),
+                id: 'pluginName',
+                name: 'settings[pluginName]',
+                value: settings.pluginName,
+                errors: settings.getErrors('pluginName'),
+                placeholder: plugin.name,
+                fieldClass: 'width-50',
+                disabled: not allowAdminChanges,
+            }) }}
+
+            <hr>
+
+            {{ forms.autosuggestField({
+                label: 'Beneficiary name'|t('qr-payments'),
+                instructions: 'The account holder name stamped on every generated payment QR code.'|t('qr-payments'),
+                id: 'beneficiaryName',
+                name: 'settings[beneficiaryName]',
+                value: settings.beneficiaryName,
+                errors: settings.getErrors('beneficiaryName'),
+                suggestEnvVars: true,
+                required: true,
+                fieldClass: 'width-50',
+                disabled: not allowAdminChanges,
+            }) }}
+
+            {{ forms.autosuggestField({
+                label: 'IBAN'|t('qr-payments'),
+                instructions: 'The bank account payments should be sent to.'|t('qr-payments'),
+                id: 'iban',
+                name: 'settings[iban]',
+                value: settings.iban,
+                errors: settings.getErrors('iban'),
+                suggestEnvVars: true,
+                required: true,
+                fieldClass: 'width-50',
+                disabled: not allowAdminChanges,
+            }) }}
+
+            {{ forms.autosuggestField({
+                label: 'BIC'|t('qr-payments'),
+                instructions: 'Optional for SEPA accounts within the EEA. Required for non-EEA accounts.'|t('qr-payments'),
+                id: 'bic',
+                name: 'settings[bic]',
+                value: settings.bic,
+                errors: settings.getErrors('bic'),
+                suggestEnvVars: true,
+                fieldClass: 'width-50',
+                disabled: not allowAdminChanges,
+            }) }}
+
+            {{ forms.textField({
+                label: 'Reference prefix'|t('qr-payments'),
+                instructions: 'Prepended to the reference generated for each new payment. Only letters and digits are kept; anything else is stripped.'|t('qr-payments'),
+                id: 'referencePrefix',
+                name: 'settings[referencePrefix]',
+                value: settings.referencePrefix,
+                errors: settings.getErrors('referencePrefix'),
+                placeholder: 'PAY',
+                fieldClass: 'width-50',
+                disabled: not allowAdminChanges,
+            }) }}
+
+            <hr>
+
+            {{ forms.textField({
+                label: 'Default expiry time'|t('qr-payments'),
+                instructions: 'Number of days after creation a new payment is due.'|t('qr-payments'),
+                warning: 'This period can not be enforced on clients and is only to be used for administrative purposes'|t('qr-payments'),
+                id: 'defaultDueDateDays',
+                name: 'settings[defaultDueDateDays]',
+                type: 'number',
+                min: 1,
+                step: 1,
+                unit: 'days'|t('qr-payments'),
+                value: settings.defaultDueDateDays,
+                errors: settings.getErrors('defaultDueDateDays'),
+                required: true,
+                disabled: not allowAdminChanges,
+            }) }}
+        </div>
+    </div>
+
+    <div id="paymentFields" class="{{ selectedTab != 'paymentFields' ? 'hidden' : '' }}">
+        {{ forms.fieldLayoutDesignerField({
+            label: "Payment fields"|t('qr-payments'),
+            instructions: 'Define any extra fields that should be saved with each payment entry.'|t('qr-payments'),
+            fieldLayout: fieldLayout,
+            disabled: not allowAdminChanges,
+        }) }}
+    </div>
+
+    <div id="paymentPage" class="{{ selectedTab != 'paymentPage' ? 'hidden' : '' }}">
+        <div class="flex-fields">
+            {{ forms.textField({
+                label: 'Pay page route'|t('qr-payments'),
+                instructions: 'Site route segment the public “pay” and “status” pages are served under, e.g. `betalen` instead of the default `qr-payments/payments`. No leading or trailing slash.'|t('qr-payments'),
+                id: 'paymentRoute',
+                name: 'settings[paymentRoute]',
+                value: settings.paymentRoute,
+                errors: settings.getErrors('paymentRoute'),
+                placeholder: 'qr-payments/payments',
+                disabled: not allowAdminChanges,
+            }) }}
+
+            {{ forms.autosuggestField({
+                label: 'Pay page template'|t('qr-payments'),
+                instructions: 'Site template path to render instead of the plugin’s built-in payment page. Leave blank to use the default.'|t('qr-payments'),
+                id: 'payTemplate',
+                name: 'settings[payTemplate]',
+                value: settings.payTemplate,
+                errors: settings.getErrors('payTemplate'),
+                placeholder: 'templates/components/_pay.twig',
+                suggestTemplates: true,
+                fieldClass: 'width-50',
+                disabled: not allowAdminChanges,
+            }) }}
+        </div>
+    </div>
+
+    <div id="notificationSettings" class="{{ selectedTab != 'notificationSettings' ? 'hidden' : '' }}">
+        <div class="flex-fields">
+            <div class="field">
+                <div class="pane mb-0 tip">
+                    <p>{{ 'This plugin doesn’t include its own scheduler. Configure a cron job (or your hosting platform’s scheduled tasks) to run `php craft qr-payments/reminder/send` on whatever interval reminder emails should go out, e.g. once daily.'|t('qr-payments') }}</p>
+                </div>
+            </div>
+
+            {{ forms.elementSelectField({
+                label: 'Recipients'|t('qr-payments'),
+                instructions: 'Users who should receive the payment reminder digest.'|t('qr-payments'),
+                id: 'reminderRecipients',
+                name: 'settings[reminderRecipients]',
+                elementType: 'craft\\elements\\User',
+                elements: reminderRecipientUsers,
+                sources: '*',
+                errors: settings.getErrors('reminderRecipients'),
+                disabled: not allowAdminChanges,
+            }) }}
+        </div>
+    </div>
+
+    <div id="emails" class="{{ selectedTab != 'emails' ? 'hidden' : '' }}">
+        <div class="flex-fields">
+            {{ forms.autosuggestField({
+                label: 'Payment created email template'|t('qr-payments'),
+                instructions: 'Site template path to render instead of the plugin’s built-in template. Leave blank to use the default.'|t('qr-payments'),
+                id: 'paymentCreatedTemplate',
+                name: 'settings[paymentCreatedTemplate]',
+                value: settings.paymentCreatedTemplate,
+                errors: settings.getErrors('paymentCreatedTemplate'),
+                placeholder: 'templates/emails/_paymentCreated.twig',
+                suggestTemplates: true,
+                fieldClass: 'width-50',
+                disabled: not allowAdminChanges,
+            }) }}
+
+            {{ forms.autosuggestField({
+                label: 'Status changed email template'|t('qr-payments'),
+                instructions: 'Site template path to render instead of the plugin’s built-in template. Leave blank to use the default.'|t('qr-payments'),
+                id: 'paymentStatusChangedTemplate',
+                name: 'settings[paymentStatusChangedTemplate]',
+                value: settings.paymentStatusChangedTemplate,
+                errors: settings.getErrors('paymentStatusChangedTemplate'),
+                placeholder: 'templates/emails/_statusChanged.twig',
+                suggestTemplates: true,
+                fieldClass: 'width-50',
+                disabled: not allowAdminChanges,
+            }) }}
+
+            {{ forms.autosuggestField({
+                label: 'Payment reminder email template'|t('qr-payments'),
+                instructions: 'Site template path to render instead of the plugin’s built-in template. Leave blank to use the default.'|t('qr-payments'),
+                id: 'paymentReminderTemplate',
+                name: 'settings[paymentReminderTemplate]',
+                value: settings.paymentReminderTemplate,
+                errors: settings.getErrors('paymentReminderTemplate'),
+                placeholder: 'templates/emails/_paymentReminder.twig',
+                suggestTemplates: true,
+                fieldClass: 'width-50',
+                disabled: not allowAdminChanges,
+            }) }}
+        </div>
+    </div>
+{% endblock %}

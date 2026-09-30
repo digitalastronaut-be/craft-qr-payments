@@ -1,0 +1,201 @@
+{% extends "_layouts/cp.twig" %}
+
+{% import '_includes/forms.twig' as forms %}
+
+{% set title = "Process payments"|t('qr-payments') %}
+{% set selectedSubnavItem = 'process' %}
+
+{% set crumbs = [
+    { label: 'QR payments'|t('qr-payments'), url: url('qr-payments') },
+    { label: 'Payment history'|t('qr-payments'), url: url('qr-payments/payments') },
+    { label: 'Process payments'|t('qr-payments'), url: url('qr-payments/payments/process') },
+] %}
+
+{% block content %}
+    <form method="post" accept-charset="UTF-8" enctype="multipart/form-data">
+        {{ csrfInput() }}
+        {{ actionInput('qr-payments/process/index') }}
+
+        <div class="flex-fields">
+            {{ forms.field({
+                first: true,
+                label: 'Bank export'|t('qr-payments'),
+                instructions: 'Upload a CSV or Excel export of your bank transactions.'|t('qr-payments'),
+                id: 'file',
+            }, '<input type="file" id="file" name="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">'|raw) }}
+        </div>
+
+        <div class="buttons">
+            <button type="submit" class="btn submit">{{ 'Start processing'|t('qr-payments') }}</button>
+        </div>
+    </form>
+
+    {% if import %}
+        <hr>
+
+        {% if import.rows is empty %}
+            <p class="zilch small">{{ 'No rows were found in that file.'|t('qr-payments') }}</p>
+        {% else %}
+            {% set columnCount = import.headers is not empty ? import.headers|length : import.rows[0]|length %}
+            {% set columnLabels = {} %}
+
+            {% for i in 0..(columnCount - 1) %}
+                {% set headerLabel = import.headers is not empty ? import.headers[i] : null %}
+                {% set columnLabels = columnLabels|merge({ (i): headerLabel ?? 'Column {number}'|t('qr-payments', { number: i + 1 }) }) %}
+            {% endfor %}
+
+            {% set defaultOrder = [import.amountColumn, import.referenceColumn]|filter(v => v is not null) %}
+            {% set order = (columnOrder ?? defaultOrder)|filter(i => i < columnCount) %}
+
+            {% set columnOptions = [] %}
+            {% for i in 0..(columnCount - 1) %}
+                {% set columnOptions = columnOptions|merge([{ value: i, label: columnLabels[i] }]) %}
+            {% endfor %}
+
+            <div class="buttons">
+                <button
+                    type="button"
+                    class="btn menubtn"
+                    id="qrp-columns-btn"
+                    data-icon="sliders"
+                    data-disclosure-trigger
+                    aria-controls="qrp-columns-menu"
+                    aria-expanded="false"
+                >{{ 'View'|t('qr-payments') }}</button>
+                <button type="button" class="btn" id="qrp-clear-btn">{{ 'Start over'|t('qr-payments') }}</button>
+                <button type="button" class="btn submit" id="qrp-auto-process-btn">{{ 'Auto process'|t('qr-payments') }}</button>
+            </div>
+
+            <div id="qrp-columns-menu" class="menu menu--disclosure element-index-view-menu">
+                <div class="meta">
+                    {{ forms.lightswitchField({
+                        label: 'Matching payments only'|t('qr-payments'),
+                        onLabel: 'Matched'|t('qr-payments'),
+                        offLabel: 'All'|t('qr-payments'),
+                        id: 'qrp-only-matched',
+                        name: 'onlyMatched',
+                        on: onlyMatched,
+                    }) }}
+                    {{ forms.checkboxSelectField({
+                        label: 'View'|t('qr-payments'),
+                        id: 'qrp-columns-select',
+                        name: 'qrpColumns',
+                        sortable: true,
+                        options: columnOptions,
+                        values: order,
+                        fieldClass: "table-columns-field"
+                    }) }}
+                </div>
+                <div class="flex menu-footer">
+                    <div class="flex-grow"></div>
+                    <button type="button" class="btn submit" id="qrp-columns-save">{{ 'Save view'|t('qr-payments') }}</button>
+                </div>
+            </div>
+
+            {% js %}
+                (function() {
+                    var $menu = $('#qrp-columns-menu');
+
+                    $menu.find('#qrp-columns-save').on('click', function() {
+                        var order = $menu.find('.checkbox-select input[type="checkbox"]:checked').map(function() {
+                            return parseInt($(this).val(), 10);
+                        }).get();
+
+                        var onlyMatched = !!$menu.find('input[name="onlyMatched"]').val();
+
+                        Craft.sendActionRequest('POST', 'qr-payments/process/save-view', {
+                            data: {
+                                filename: {{ filename|json_encode|raw }},
+                                order: order,
+                                onlyMatched: onlyMatched,
+                            },
+                        }).then(function(response) {
+                            Craft.cp.displayNotice(response.data.message);
+                            window.location.reload();
+                        }).catch(function(error) {
+                            Craft.cp.displayError(error?.response?.data?.message);
+                        });
+                    });
+
+                    $('#qrp-clear-btn').on('click', function() {
+                        Craft.sendActionRequest('POST', 'qr-payments/process/clear').then(function() {
+                            window.location.reload();
+                        }).catch(function(error) {
+                            Craft.cp.displayError(error?.response?.data?.message);
+                        });
+                    });
+
+                    $('#qrp-auto-process-btn').on('click', function() {
+                        if (!confirm({{ 'Apply the suggested action to every matched payment?'|t('qr-payments')|json_encode|raw }})) return;
+
+                        Craft.sendActionRequest('POST', 'qr-payments/process/auto-process').then(function(response) {
+                            Craft.cp.displayNotice(response.data.message);
+                            window.location.reload();
+                        }).catch(function(error) {
+                            Craft.cp.displayError(error?.response?.data?.message);
+                        });
+                    });
+                })();
+            {% endjs %}
+
+            <div class="qrp-import-table-wrap">
+                <table class="data fullwidth">
+                    <thead>
+                        <tr>
+                            {% for i in order %}
+                                <th>{{ columnLabels[i] }}</th>
+                            {% endfor %}
+                            <th>{{ 'Matching payment'|t('qr-payments') }}</th>
+                            <th>{{ 'Actions'|t('qr-payments') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% set rowIndexes = 0..(import.rows|length - 1) %}
+                        {% if onlyMatched %}
+                            {% set rowIndexes = rowIndexes|filter(rowIndex => (matches[rowIndex].payment ?? null) is not null) %}
+                        {% endif %}
+
+                        {% for rowIndex in rowIndexes %}
+                            {% set row = import.rows[rowIndex] %}
+                            {% set match = matches[rowIndex] ?? null %}
+                            {% set payment = match.payment ?? null %}
+                            <tr>
+                                {% for i in order %}
+                                    {% set value = row[i] ?? '' %}
+                                    <td>{{ value|truncate(30) }}</td>
+                                {% endfor %}
+                                <td class="qrp-matching-payment">
+                                    {% if payment %}
+                                        <div class="flex flex-nowrap gap-xs">
+                                            <span class="light qrp-matching-payment-label">{{ 'Now'|t('qr-payments') }}</span>
+                                            {{ match.status|raw }}
+                                            <span class="light">{{ 'Paid {paid} of {total}'|t('qr-payments', { paid: match.netPaidNow|money, total: payment.amount|money }) }}</span>
+                                        </div>
+                                        {% if match.suggestedAction %}
+                                            <div class="flex flex-nowrap gap-xs">
+                                                <span class="light qrp-matching-payment-label">{{ match.suggestedAction }} &rarr;</span>
+                                                {{ match.statusAfter|raw }}
+                                                <span class="light">{{ 'Paid {paid} of {total}'|t('qr-payments', { paid: match.netPaidAfter|money, total: payment.amount|money }) }}</span>
+                                            </div>
+                                        {% endif %}
+                                    {% else %}
+                                        <span class="light">{{ 'Unmatched'|t('qr-payments') }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if match.alreadyProcessed %}
+                                        <span class="light">{{ 'Already processed'|t('qr-payments') }}</span>
+                                    {% elseif payment %}
+                                        {{ payment.historyActionButtonsHtml(true)|raw }}
+                                    {% else %}
+                                        &mdash;
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    {% endif %}
+{% endblock %}

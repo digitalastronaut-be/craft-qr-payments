@@ -1,0 +1,43 @@
+{# @var payment \digitalastronaut\craftqrpayments\elements\Payment #}
+{# @var qrCodeDataUri string|null #}
+
+{% set status = payment.getStatus() %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ 'Pay your order'|t('qr-payments') }}</title>
+</head>
+<body class="qr-pay">
+    {% if status == 'paid' %}
+        <h1>{{ 'Payment received'|t('qr-payments') }}</h1>
+        <p>{{ 'Thank you — this payment has already been completed.'|t('qr-payments') }}</p>
+    {% elseif status in ['cancelled', 'refunded'] %}
+        <h1>{{ 'Payment no longer active'|t('qr-payments') }}</h1>
+        <p>{{ 'This payment request is no longer active.'|t('qr-payments') }}</p>
+    {% elseif status == 'expired' %}
+        <h1>{{ 'Payment expired'|t('qr-payments') }}</h1>
+        <p>{{ 'This payment request has expired.'|t('qr-payments') }}</p>
+    {% else %}
+        <h1>{{ 'Scan to pay'|t('qr-payments') }}</h1>
+        <p>{{ 'Scan the QR code below with your banking app to pay instantly.'|t('qr-payments') }}</p>
+
+        {% if qrCodeDataUri %}
+            <img class="qr-pay__qr-code" src="{{ qrCodeDataUri }}" alt="{{ 'Payment QR code'|t('qr-payments') }}">
+        {% endif %}
+
+        <p>{{ 'Or transfer manually using these details:'|t('qr-payments') }}</p>
+
+        <ul class="qr-pay__details">
+            <li><strong>{{ 'Beneficiary:'|t('qr-payments') }}</strong> {{ payment.beneficiaryName }}</li>
+            <li><strong>{{ 'IBAN:'|t('qr-payments') }}</strong> {{ payment.iban }}</li>
+            {% if payment.bic %}<li><strong>{{ 'BIC:'|t('qr-payments') }}</strong> {{ payment.bic }}</li>{% endif %}
+            <li><strong>{{ 'Amount:'|t('qr-payments') }}</strong> {{ payment.amount|money }}</li>
+            <li><strong>{{ 'Reference:'|t('qr-payments') }}</strong> {{ payment.remittanceReference }}</li>
+            {% if payment.dueDate %}<li><strong>{{ 'Due date:'|t('qr-payments') }}</strong> {{ payment.dueDate|date('Y-m-d') }}</li>{% endif %}
+        </ul>
+    {% endif %}
+</body>
+</html>

@@ -1,0 +1,64 @@
+{# ======================= #}
+{# PROPERTIES              #}
+{# ======================= #}
+{% import '_includes/forms.twig' as forms %}
+
+{# ======================= #}
+{# TEMPLATE                #}
+{# ======================= #}
+<div id="{{ id }}">
+    <div class="flex-fields">
+        {{ forms.selectizeField({
+            label: 'Statuses'|t('qr-payments'),
+            id: 'statuses',
+            name: 'statuses',
+            multi: true,
+            options: statusOptions,
+            values: widget.getStatusesArray(),
+            errors: widget.getErrors('statuses'),
+            fieldClass: 'width-25',
+        }) }}
+
+        {{ forms.rangeField({
+            label: 'Limit'|t('qr-payments'),
+            id: 'limit',
+            name: 'limit',
+            value: widget.limit,
+            min: 0,
+            max: 20,
+            step: 1,
+            errors: widget.getErrors('limit'),
+            fieldClass: 'width-25',
+        }) }}
+
+        <div class="line-break"></div>
+
+        {{ forms.selectizeField({
+            label: 'Chart'|t('qr-payments'),
+            id: 'chart-display',
+            name: 'chartDisplay',
+            options: chartDisplayOptions,
+            value: widget.chartDisplay,
+            errors: widget.getErrors('chartDisplay'),
+            fieldClass: 'width-25',
+        }) }}
+
+        {{ forms.selectizeField({
+            label: 'Sort payments by'|t('qr-payments'),
+            id: 'sort',
+            name: 'sort',
+            options: sortOptions,
+            value: widget.sort,
+            errors: widget.getErrors('sort'),
+            fieldClass: 'width-25',
+        }) }}
+
+        <div class="line-break"></div>
+
+        {% include "qr-payments/components/_dateRangeField" with { 
+            id: namespaceId, 
+            widget: widget, 
+            fieldClass: 'width-25' 
+        } %}
+    </div>
+</div>

@@ -1,0 +1,36 @@
+{# @var elementId int #}
+{# @var type string #}
+{# @var title string #}
+{# @var showAmount bool #}
+
+{% import '_includes/forms.twig' as forms %}
+
+<h2>{{ title }}</h2>
+
+{{ hiddenInput('elementId', elementId) }}
+{{ hiddenInput('type', type) }}
+
+<div class="flex-fields">
+    {% if showAmount %}
+        {{ forms.moneyField({
+            first: true,
+            label: 'Amount'|t('qr-payments'),
+            id: 'amount',
+            name: 'amount',
+            currency: 'EUR',
+            currencyLabel: '(EUR) €',
+            required: true,
+            autofocus: true,
+        }) }}
+    {% endif %}
+
+    {{ forms.textareaField({
+        first: not showAmount,
+        label: 'Note'|t('qr-payments'),
+        id: 'note',
+        name: 'note',
+        rows: 4,
+        placeholder: 'Explain this status change for later reference'|t('qr-payments'),
+        autofocus: not showAmount,
+    }) }}
+</div>

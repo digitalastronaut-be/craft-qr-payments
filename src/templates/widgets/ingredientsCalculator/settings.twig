@@ -1,0 +1,17 @@
+{# ======================= #}
+{# PROPERTIES              #}
+{# ======================= #}
+{% import '_includes/forms.twig' as forms %}
+
+{# ======================= #}
+{# TEMPLATE                #}
+{# ======================= #}
+<div id="{{ id }}">
+    <div class="flex-fields">
+        {% include "qr-payments/components/_dateRangeField" with {
+            id: namespaceId,
+            widget: widget,
+            fieldClass: 'width-50'
+        } %}
+    </div>
+</div>

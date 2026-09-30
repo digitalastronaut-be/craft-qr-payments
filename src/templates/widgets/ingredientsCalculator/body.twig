@@ -1,0 +1,34 @@
+{% if ingredients|length %}
+    <table class="qr-payments-ingredients-table data fullwidth">
+        <thead>
+            <tr>
+                <th>{{ 'Ingredient'|t('qr-payments') }}</th>
+                <th class="column-amount">{{ 'Amount'|t('qr-payments') }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ingredient in ingredients %}
+                <tr>
+                    <td class="title">{{ ingredient.name }}</td>
+                    <td class="column-amount">{{ ingredient.amount|round|number_format(0) }} {{ ingredient.unit }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <p class="zilch small">{{ 'No ingredients needed for this timeframe.'|t('qr-payments') }}</p>
+{% endif %}
+
+{% css %}
+.qr-payments-ingredients-table {
+    width: 100%;
+}
+
+.qr-payments-ingredients-table tbody tr td {
+    min-height: 52px;
+}
+
+.qr-payments-ingredients-table tbody tr {
+    border-block: 1px solid var(--pane-bg);
+}
+{% endcss %}

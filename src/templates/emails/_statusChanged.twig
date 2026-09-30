@@ -1,0 +1,24 @@
+{# ======================= #}
+{# PROPERTIES              #}
+{# ======================= #}
+{% extends "qr-payments/emails/_layout" %}
+
+{# @var payment \digitalastronaut\craftqrpayments\elements\Payment #}
+{# @var previousStatusLabel string #}
+{# @var statusLabel string #}
+
+{# ======================= #}
+{# TEMPLATE                #}
+{# ======================= #}
+{% block content %}
+    <h2 style="{{ heading2Style }}">Hello,</h2>
+
+    <p style="{{ textStyle }}" style="margin: 0 0 24px 0; line-height: 1.5;">
+        {{ "The status of your payment"|t }} ({{ payment.remittanceReference }}) {{ "has changed from"|t }} "{{ previousStatusLabel }}" {{ "to"|t }} "{{ statusLabel }}".
+    </p>
+
+    <ul>
+        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Amount:"|t }}</span>{{ payment.amount|money }}</li>
+        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Reference:"|t }}</span>{{ payment.remittanceReference }}</li>
+    </ul>
+{% endblock %}

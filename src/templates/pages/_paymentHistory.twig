@@ -1,0 +1,23 @@
+{% extends "_layouts/elementindex" %}
+
+{% set selectedSubnavItem = 'payments' %}
+
+{% set title = "Payments"|t('qr-payments') %}
+{% set elementType = 'digitalastronaut\\craftqrpayments\\elements\\Payment' %}
+
+{% set crumbs = [
+    { label: 'QR payments'|t('qr-payments'), url: url('qr-payments') },
+    { label: 'Payment history'|t('qr-payments'), url: url('qr-payments/payments') },
+] %}
+
+{% set additionalButtons %}
+    <a class="btn" href="{{ url('qr-payments/payments/process') }}">
+        {{ "Process payments"|t('qr-payments') }}
+    </a>
+{% endset %}
+
+{% block actionButton %}
+    <a class="btn submit add icon" href="{{ url('qr-payments/payments/new') }}">
+        {{ "New payment"|t('qr-payments') }}
+    </a>
+{% endblock %}

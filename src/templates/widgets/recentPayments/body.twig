@@ -1,0 +1,171 @@
+{# ======================= #}
+{# TEMPLATE                #}
+{# ======================= #}
+{% if chartData.datasets|length %}
+    <div class="qr-payments-widget-chart-wrapper">
+        <canvas id="{{ chartId }}"></canvas>
+    </div>
+
+    {% js %}
+        (() => {
+            const chartData = {{ chartData|json_encode|raw }};
+            const hasCounts = chartData.datasets.some((dataset) => dataset.yAxisID === 'yCount');
+            const hasAmounts = chartData.datasets.some((dataset) => dataset.yAxisID === 'yAmount');
+
+            new Chart(document.getElementById('{{ chartId }}'), {
+                type: 'bar',
+                data: chartData,
+                options: {
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    layout: {
+                        padding: { bottom: 8 },
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            filter: (item) => !(hasCounts && hasAmounts && item.dataset.yAxisID === 'yAmount'),
+                            callbacks: {
+                                label: (context) => {
+                                    const { dataset, dataIndex, chart } = context;
+                                    const formatAmount = (amount) => amount.toLocaleString(undefined, { style: 'currency', currency: 'EUR' });
+
+                                    if (dataset.yAxisID === 'yCount' && hasAmounts) {
+                                        const amountDataset = chart.data.datasets.find((d) => d.yAxisID === 'yAmount' && d.label === dataset.label);
+                                        const amount = amountDataset ? amountDataset.data[dataIndex] : null;
+
+                                        if (amount !== null) {
+                                            return `${dataset.label}: ${dataset.data[dataIndex]} (${formatAmount(amount)})`;
+                                        }
+                                    }
+
+                                    if (dataset.yAxisID === 'yAmount') {
+                                        return `${dataset.label}: ${formatAmount(context.parsed.y)}`;
+                                    }
+
+                                    return `${dataset.label}: ${context.parsed.y}`;
+                                },
+                            },
+                        },
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            ticks: { display: true },
+                            grid: { display: false, tickLength: 0, drawBorder: false },
+                        },
+                        yCount: {
+                            type: 'linear',
+                            position: 'left',
+                            display: hasCounts,
+                            grace: "10%",
+                            suggestedMax: 5,
+                            ticks: {
+                                stepSize: 1,
+                                maxTicksLimit: 8,
+                                callback: (value) => (value >= 0 ? value : ''),
+                            },
+                            grid: { borderDash: [5, 5], drawOnChartArea: hasCounts },
+                        },
+                        yAmount: {
+                            type: 'linear',
+                            position: 'right',
+                            display: hasAmounts,
+                            grace: "10%",
+                            beginAtZero: true,
+                            ticks: {
+                                maxTicksLimit: 8,
+                                callback: (value) => (value >= 0 ? `€${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : ''),
+                            },
+                            grid: { borderDash: [5, 5], drawOnChartArea: hasAmounts && !hasCounts },
+                        },
+                    },
+                },
+            });
+        })();
+    {% endjs %}
+{% endif %}
+
+{% if payments|length %}
+    <table class="qr-payments-widget-table data fullwidth">
+        <thead>
+            <tr>
+                <th>{{ 'Payment'|t('qr-payments') }}</th>
+                <th class="column-amount">{{ 'Amount'|t('qr-payments') }}</th>
+                <th class="column-status">{{ 'Status'|t('qr-payments') }}</th>
+                <th class="column-date">{{ 'Date'|t('qr-payments') }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for payment in payments %}
+                {% set statusDef = statuses[payment.getStatus()] ?? null %}
+                <tr>
+                    <td class="title">
+                        <a href="{{ payment.getCpEditUrl() }}">{{ payment.title }}</a>
+                    </td>
+
+                    <td class="column-amount">{{ payment.amount|money }}</td>
+
+                    <td class="column-status">
+                        {% if statusDef %}
+                            <div class="flex flex-inline gap-xs">
+                                {{ statusIndicator(payment.getStatus(), statusDef) }}
+                                <div>{{ statusDef.label }}</div>
+                            </div>
+                        {% endif %}
+                    </td>
+
+                    <td class="column-date">{{ payment.dateCreated|timestamp('short') }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <a class="go" href="{{ indexUrl }}">{{ 'View all payments'|t('qr-payments') }}</a>
+{% else %}
+    <p class="zilch small">{{ 'No payments found for this timeframe.'|t('qr-payments') }}</p>
+{% endif %}
+
+{% css %}
+.qr-payments-widget-chart-wrapper {
+    position: relative;
+    height: 280px;
+    margin-bottom: 16px;
+}
+
+.qr-payments-widget-table {
+    width: 100%;
+}
+
+.qr-payments-widget-table tbody tr td {
+    min-height: 52px;
+}
+
+.qr-payments-widget-table tbody tr td.title {
+    max-width: 25vw !important;
+}
+
+.qr-payments-widget-table tbody tr {
+    border-block: 1px solid var(--pane-bg);
+}
+
+.qr-payments-widget-table tbody tr td.title {
+    padding-block: 8px;
+}
+
+[data-colspan="1"] .qr-payments-widget-table th:nth-child(n+3),
+[data-colspan="1"] .qr-payments-widget-table td:nth-child(n+3),
+[data-colspan="2"] .qr-payments-widget-table th:nth-child(n+5),
+[data-colspan="2"] .qr-payments-widget-table td:nth-child(n+5) {
+    display: none;
+}
+
+.go {
+    display: block;
+    margin-top: 16px;
+}
+{% endcss %}

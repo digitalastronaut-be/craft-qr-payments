@@ -1,0 +1,52 @@
+{
+	"name": "digitalastronaut/craft-qr-payments",
+	"description": "Managed QR code payments using the european EPC standard for SEPA transactions",
+	"type": "craft-plugin",
+	"license": "proprietary",
+	"support": {
+		"email": "bram@digitalastronaut.be",
+		"issues": "https://github.com/digitalastronaut-be/craft-qr-payments/issues?state=open",
+		"source": "https://github.com/digitalastronaut-be/craft-qr-payments",
+		"docs": "https://github.com/digitalastronaut-be/craft-qr-payments",
+		"rss": "https://github.com/digitalastronaut-be/craft-qr-payments/releases.atom"
+	},
+	"require": {
+		"php": ">=8.4",
+		"craftcms/cms": "^5.10.0",
+		"smhg/sepa-qr-data": "^3.0",
+		"endroid/qr-code": "^6.1",
+		"globalcitizen/php-iban": "^4.2",
+		"moneyphp/money": "^4.0",
+		"nesbot/carbon": "^2.67",
+		"phpoffice/phpspreadsheet": "^5.3",
+		"nystudio107/craft-plugin-vite": "^5.0.0"
+	},
+	"require-dev": {
+		"craftcms/ecs": "dev-main",
+		"craftcms/phpstan": "dev-main"
+	},
+	"autoload": {
+		"psr-4": {
+			"digitalastronaut\\craftqrpayments\\": "src/"
+		}
+	},
+	"extra": {
+		"handle": "qr-payments",
+		"name": "QR payments",
+		"developer": "digitalastronaut",
+		"documentationUrl": "https://github.com/digitalastronaut-be/craft-qr-payments",
+		"class": "digitalastronaut\\craftqrpayments\\QrPayments"
+	},
+	"scripts": {
+		"check-cs": "ecs check --ansi",
+		"fix-cs": "ecs check --ansi --fix",
+		"phpstan": "phpstan --memory-limit=1G"
+	},
+	"config": {
+		"sort-packages": true,
+		"allow-plugins": {
+			"yiisoft/yii2-composer": true,
+			"craftcms/plugin-installer": true
+		}
+	}
+}

@@ -1,0 +1,38 @@
+{# ======================= #}
+{# PROPERTIES              #}
+{# ======================= #}
+{% extends "qr-payments/emails/_layout" %}
+
+{# @var payments \digitalastronaut\craftqrpayments\elements\Payment[] #}
+
+{# ======================= #}
+{# TEMPLATE                #}
+{# ======================= #}
+{% block content %}
+    <h2 style="{{ heading2Style }}">{{ "Payments still awaiting processing"|t('qr-payments') }}</h2>
+
+    <p style="{{ textStyle }}">
+        {{ "The following {count} payment(s) are still pending and haven’t been matched to a bank transfer yet:"|t('qr-payments', { count: payments|length }) }}
+    </p>
+
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr>
+                <th style="{{ tableHeaderStyle }}">{{ "Reference"|t('qr-payments') }}</th>
+                <th style="{{ tableHeaderStyle }}">{{ "Amount"|t('qr-payments') }}</th>
+                <th style="{{ tableHeaderStyle }}">{{ "Due date"|t('qr-payments') }}</th>
+                <th style="{{ tableHeaderStyle }}">{{ "Email"|t('qr-payments') }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for payment in payments %}
+                <tr>
+                    <td style="{{ tableCellStyle }}"><a href="{{ payment.getCpEditUrl() }}">{{ payment.remittanceReference }}</a></td>
+                    <td style="{{ tableCellStyle }}">{{ payment.amount|money }}</td>
+                    <td style="{{ tableCellStyle }}">{{ payment.dueDate ? payment.dueDate|date('Y-m-d') : '—' }}</td>
+                    <td style="{{ tableCellStyle }}">{{ payment.email }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% endblock %}
