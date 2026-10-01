@@ -196,7 +196,7 @@ return [
   'Title' => 'Titel',
   'Total price' => 'Totaalprijs',
   'Type' => 'Type',
-  'Unmatched' => 'Niet gekoppeld',
+  'Unmatched' => 'Geen gevonden',
   'Update on your payment {reference}' => 'Update over uw betaling {reference}',
   'Updated by' => 'Bijgewerkt door',
   'Upload a CSV or Excel export of your bank transactions.' => 'Upload een CSV- of Excel-export van uw banktransacties.',

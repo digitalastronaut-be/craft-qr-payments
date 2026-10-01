@@ -40,7 +40,6 @@
                 value: settings.pluginName,
                 errors: settings.getErrors('pluginName'),
                 placeholder: plugin.name,
-                fieldClass: 'width-50',
                 disabled: not allowAdminChanges,
             }) }}
 
@@ -55,7 +54,6 @@
                 errors: settings.getErrors('beneficiaryName'),
                 suggestEnvVars: true,
                 required: true,
-                fieldClass: 'width-50',
                 disabled: not allowAdminChanges,
             }) }}
 
@@ -68,7 +66,6 @@
                 errors: settings.getErrors('iban'),
                 suggestEnvVars: true,
                 required: true,
-                fieldClass: 'width-50',
                 disabled: not allowAdminChanges,
             }) }}
 
@@ -80,7 +77,6 @@
                 value: settings.bic,
                 errors: settings.getErrors('bic'),
                 suggestEnvVars: true,
-                fieldClass: 'width-50',
                 disabled: not allowAdminChanges,
             }) }}
 
@@ -92,7 +88,6 @@
                 value: settings.referencePrefix,
                 errors: settings.getErrors('referencePrefix'),
                 placeholder: 'PAY',
-                fieldClass: 'width-50',
                 disabled: not allowAdminChanges,
             }) }}
 
@@ -147,7 +142,6 @@
                 errors: settings.getErrors('payTemplate'),
                 placeholder: 'templates/components/_pay.twig',
                 suggestTemplates: true,
-                fieldClass: 'width-50',
                 disabled: not allowAdminChanges,
             }) }}
         </div>
@@ -177,6 +171,12 @@
 
     <div id="emails" class="{{ selectedTab != 'emails' ? 'hidden' : '' }}">
         <div class="flex-fields">
+            <div class="field">
+                <div class="pane mb-0 tip">
+                    <p>{{ "Each of the plugin's three system emails renders its own bundled template by default — override any of them with a site template path instead:"|t("qr-payments") }}</p>
+                </div>
+            </div>
+
             {{ forms.autosuggestField({
                 label: 'Payment created email template'|t('qr-payments'),
                 instructions: 'Site template path to render instead of the plugin’s built-in template. Leave blank to use the default.'|t('qr-payments'),
@@ -186,7 +186,6 @@
                 errors: settings.getErrors('paymentCreatedTemplate'),
                 placeholder: 'templates/emails/_paymentCreated.twig',
                 suggestTemplates: true,
-                fieldClass: 'width-50',
                 disabled: not allowAdminChanges,
             }) }}
 
@@ -199,7 +198,6 @@
                 errors: settings.getErrors('paymentStatusChangedTemplate'),
                 placeholder: 'templates/emails/_statusChanged.twig',
                 suggestTemplates: true,
-                fieldClass: 'width-50',
                 disabled: not allowAdminChanges,
             }) }}
 
@@ -212,7 +210,6 @@
                 errors: settings.getErrors('paymentReminderTemplate'),
                 placeholder: 'templates/emails/_paymentReminder.twig',
                 suggestTemplates: true,
-                fieldClass: 'width-50',
                 disabled: not allowAdminChanges,
             }) }}
         </div>

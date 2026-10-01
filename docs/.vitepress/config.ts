@@ -1,6 +1,7 @@
 import { defineConfig } from "vitepress";
 
 export default defineConfig({
+	base: "/qr-payments/",
 	title: "Craft QR Payments",
 	description: "EPC QR code SEPA payment requests for Craft CMS",
 	themeConfig: {

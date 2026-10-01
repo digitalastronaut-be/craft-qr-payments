@@ -34,19 +34,6 @@ use yii\base\Exception;
  */
 class PaymentsService extends Component {
     /**
-     * Creates and persists a new pending Payment, stamped with the
-     * beneficiary bank details from plugin settings (IBAN/BIC/name, which
-     * may themselves be env vars) and a freshly generated, guaranteed
-     * unique remittance reference.
-     *
-     * `$dueDate` defaults to `null`, meaning "use the plugin's configured
-     * default due date window" (`Settings::$defaultDueDateDays` from now) —
-     * pass an explicit value to override it per payment.
-     *
-     * The payment-created email is pushed to the queue (not sent inline
-     * here) so a slow/unreachable mail server can never delay or drop the
-     * response to whatever's calling this — see `SendPaymentCreatedEmailJob`.
-     *
      * @param float $amount
      * @param string $email
      * @param DateTime|null $dueDate
@@ -108,12 +95,6 @@ class PaymentsService extends Component {
     }
 
     /**
-     * Builds the alphanumeric body of the RF reference: the configured
-     * prefix — sanitized down to the letters/digits ISO 11649 allows, and
-     * truncated to leave room for the random suffix — plus 8 random
-     * base-16 characters for uniqueness (the same amount of entropy the
-     * previous `PREFIX-XXXXXXXX` scheme used).
-     *
      * @param string $prefix
      * @return string
      */
