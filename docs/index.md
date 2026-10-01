@@ -5,6 +5,9 @@ hero:
     name: "QR Payments Plugin"
     text: "Documentation"
     tagline: EPC QR code SEPA payment requests for Craft CMS, reconciled by hand — no payment processor required.
+    image:
+        src: /icons/mascotte.svg
+        alt: QR Payments
     actions:
         - theme: brand
           text: Getting started

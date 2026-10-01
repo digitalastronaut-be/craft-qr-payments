@@ -2,10 +2,10 @@
 
 Post to the `qr-payments/payments/request` action to create a payment. It's public and anonymous — no control panel session required — and accepts two body params:
 
-| Param | Required | Notes |
-| --- | --- | --- |
-| `amount` | Yes | Must be a value previously produced by `craft.app.security.hashData()` — see [Tamper protection](#tamper-protection) below. |
-| `email` | Yes | The payer's email address. |
+| Param    | Required | Notes                                                                                                                       |
+| -------- | -------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `amount` | Yes      | Must be a value previously produced by `craft.app.security.hashData()` — see [Tamper protection](#tamper-protection) below. |
+| `email`  | Yes      | The payer's email address.                                                                                                  |
 
 ## Tamper protection
 
@@ -38,12 +38,3 @@ A normal form submission redirects to the [pay page](/integration/the-pay-page) 
 ## Handling failures
 
 Invalid hash, missing email, or an error creating the payment all fail the same way Craft's other controllers do: a redirect back with flash errors for a normal form post, or `{ success: false, message }` for a request whose `Accept` header includes `application/json`.
-
-## What a successful AJAX request actually gets back
-
-This is easy to get wrong, so to be precise: a *successful* request **always redirects** to the [pay page](/integration/the-pay-page) — the `Accept` header makes no difference to it at all (unlike the failure case above). What that redirect looks like to your JS depends on a *different* header, `X-Requested-With`:
-
-- **Without `X-Requested-With: XMLHttpRequest`** (a plain `fetch()` that only sets `Accept`, which is the mistake it's easy to make): the server sends a real `Location`-based redirect. `fetch()` follows that automatically, so the response you get back is the *pay page's HTML*, already loaded — calling `.json()` on it throws, since there's no JSON in an HTML page.
-- **With `X-Requested-With: XMLHttpRequest` set** (what `jQuery.ajax()` does automatically, or what you'd add to `fetch()`'s headers by hand): the server responds with status `302` and an `X-Redirect` header carrying the pay page's URL, and *no body at all* — `.json()` fails here too, just because there's nothing to parse. Your own JS has to read `response.headers.get('X-Redirect')` and navigate there itself; this is the same convention Craft's own CP JS (`Craft.sendActionRequest`) follows for its own redirects.
-
-Either way, no payment data — QR code, reference, anything — comes back over AJAX on success today. If you need to build a confirmation UI in place without leaving the page, that would need `PaymentsController::actionRequest()` to return `$this->asSuccess($message, ['payment' => [...]])` instead of redirecting when the request accepts JSON — it doesn't do that today, but the plugin's own JSON success responses elsewhere already follow exactly that pattern, so it'd be a small, self-contained change.
