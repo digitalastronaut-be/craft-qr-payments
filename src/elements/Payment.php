@@ -260,8 +260,33 @@ class Payment extends Element {
      */
     public function beforeSave(bool $isNew): bool {
         $this->status = $this->computeStatus();
+        $this->syncConfirmation();
 
         return parent::beforeSave($isNew);
+    }
+
+    /**
+     * Keeps `confirmedAt`/`confirmedByUserId` in sync with `status`: stamped
+     * from the payment entry that completed the amount when the status
+     * becomes paid, cleared again if a refund or cancellation later moves
+     * the status away from paid.
+     *
+     * @return void
+     */
+    private function syncConfirmation(): void {
+        if ($this->status !== self::STATUS_PAID) {
+            $this->confirmedAt = null;
+            $this->confirmedByUserId = null;
+
+            return;
+        }
+
+        $entry = $this->latestHistoryEntryOfType(self::HISTORY_TYPE_PAYMENT);
+
+        if ($entry === null) return;
+
+        $this->confirmedAt = DateTimeHelper::toDateTime($entry['date'] ?? null) ?: null;
+        $this->confirmedByUserId = $entry['userId'] ?? null;
     }
 
     /**
@@ -324,6 +349,20 @@ class Payment extends Element {
         }
 
         return false;
+    }
+
+    /**
+     * @param string $type
+     * @return array|null The most recent history entry of this type, or null if there isn't one.
+     */
+    private function latestHistoryEntryOfType(string $type): ?array {
+        $match = null;
+
+        foreach ($this->getStatusHistory() as $entry) {
+            if (($entry['type'] ?? null) === $type) $match = $entry;
+        }
+
+        return $match;
     }
 
     /**
@@ -830,6 +869,12 @@ class Payment extends Element {
             Craft::t('qr-payments', 'Beneficiary') => fn() => $this->beneficiaryName ?: false,
             Craft::t('qr-payments', 'IBAN') => fn() => $this->iban ?: false,
             Craft::t('qr-payments', 'BIC') => fn() => $this->bic ?: false,
+            Craft::t('qr-payments', 'Confirmed at') => fn() => $this->confirmedAt
+                ? Craft::$app->getFormatter()->asDatetime($this->confirmedAt)
+                : false,
+            Craft::t('qr-payments', 'Confirmed by') => fn() => $this->confirmedByUserId
+                ? (Craft::$app->getUsers()->getUserById($this->confirmedByUserId)?->getFriendlyName() ?: false)
+                : false,
         ]);
     }
 

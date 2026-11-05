@@ -1,5 +1,8 @@
 # Release Notes for QR payments
 
+## 1.5.1-beta - 2026-11-05
+- Fixed: `confirmedAt`/`confirmedByUserId` were never actually stamped — the 1.4.0-beta changelog entry for this got ahead of the code, and the fields sat unused ever since. A payment reaching `paid` now stamps both from whichever status history entry completed the amount (whether that was a manual "Mark as paid"/"Add payment", or an entry applied from a bank statement import), and clears them again if a refund or cancellation later moves the status away from `paid`. Also now shown on the payment's sidebar info.
+
 ## 1.5.0-beta - 2026-09-29
 - Added a payment reminder digest email, listing every payment still awaiting processing, on a configurable frequency (none/daily/weekly/every two weeks) sent to a chosen set of CP users — new "Reminders" settings tab, `qr-payments/emails/_paymentReminder` template (overridable like the others), and a `qr-payments/reminder/send` console command meant to be invoked by an external cron on at least a daily basis.
 
