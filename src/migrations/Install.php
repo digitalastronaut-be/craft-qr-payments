@@ -49,6 +49,7 @@ class Install extends Migration {
 
             'remittanceReference' => $this->string(35)->notNull(),
             'remittanceText' => $this->string(140)->null(),
+            'qrCode' => $this->binary()->null(),
 
             'status' => $this->string(20)->notNull()->defaultValue('pending'),
             'statusHistory' => $this->json()->null(),
