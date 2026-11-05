@@ -14,6 +14,7 @@ export default defineConfig({
 		nav: [
 			{ text: "Home", link: "/" },
 			{ text: "Guide", link: "/plugin/installation-and-setup" },
+			{ text: "Current version: v1.0.5-beta", link: "" },
 			{ text: "Plugin store", link: "https://digitalastronaut.be/" },
 			{ text: "Maintained by Digitalastronaut", link: "https://digitalastronaut.be/" },
 		],
