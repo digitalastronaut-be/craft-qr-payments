@@ -91,7 +91,11 @@ class StatusHistoryField extends FieldLayoutElement {
         if ($date) $dateCell .= ' - ' . Html::tag('span', Carbon::instance($date)->diffForHumans(), ['class' => 'light']);
 
         $userId = $entry['userId'] ?? null;
-        $userCell = ($userId && isset($users[$userId])) ? $users[$userId]->getName() : Craft::t('qr-payments', 'System');
+        $userCell = match (true) {
+            $userId && isset($users[$userId]) => $users[$userId]->getName(),
+            ($entry['type'] ?? null) === Payment::HISTORY_TYPE_PAYER_REPORTED => Craft::t('qr-payments', 'Payer'),
+            default => Craft::t('qr-payments', 'System'),
+        };
 
         $amount = $entry['amount'] ?? null;
         $amountCell = ($amount !== null && $amount !== '') ? Html::encode(Craft::$app->getFormatter()->asCurrency($amount, Payment::CURRENCY)) : '';

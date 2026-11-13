@@ -29,7 +29,6 @@ use yii\base\Event;
 use digitalastronaut\craftqrpayments\elements\Payment;
 use digitalastronaut\craftqrpayments\variables\QrPaymentsVariable;
 use digitalastronaut\craftqrpayments\web\assets\admin\AdminAssetBundle;
-use digitalastronaut\craftqrpayments\widgets\IngredientsCalculator;
 use digitalastronaut\craftqrpayments\widgets\RecentPayments;
 
 /**
@@ -147,7 +146,6 @@ trait PluginTrait {
             Dashboard::EVENT_REGISTER_WIDGET_TYPES,
             function(RegisterComponentTypesEvent $event) {
                 $event->types[] = RecentPayments::class;
-                $event->types[] = IngredientsCalculator::class;
             }
         );
     }

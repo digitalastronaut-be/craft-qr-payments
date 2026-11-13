@@ -1,6 +1,6 @@
 {
   "src/web/assets/admin/admin.js": {
-    "file": "assets/admin-CQS0PinN.js",
+    "file": "assets/admin-BRYajQks.js",
     "name": "admin",
     "src": "src/web/assets/admin/admin.js",
     "isEntry": true,
@@ -9,12 +9,12 @@
     ]
   },
   "src/web/assets/frontend/frontend.js": {
-    "file": "assets/frontend-x1RlXPru.js",
+    "file": "assets/frontend-zu1nwZuM.js",
     "name": "frontend",
     "src": "src/web/assets/frontend/frontend.js",
     "isEntry": true,
     "css": [
-      "assets/frontend-D8V2GUn6.css"
+      "assets/frontend-COML8oyb.css"
     ]
   }
 }

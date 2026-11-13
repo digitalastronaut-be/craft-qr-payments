@@ -38,6 +38,18 @@
             <li><strong>{{ 'Reference:'|t('qr-payments') }}</strong> {{ payment.remittanceReference }}</li>
             {% if payment.dueDate %}<li><strong>{{ 'Due date:'|t('qr-payments') }}</strong> {{ payment.dueDate|date('Y-m-d') }}</li>{% endif %}
         </ul>
+
+        {% if status == 'reported' %}
+            <p class="qr-pay__notice">{{ 'Thanks — we’ve let the owner know you’ve paid. This page will update once it’s confirmed.'|t('qr-payments') }}</p>
+        {% elseif payment.canReportPaidByPayer() %}
+            <form class="qr-pay__report-form" method="post" action="">
+                {{ actionInput('qr-payments/payments/report-paid') }}
+                {{ redirectInput(payment.url) }}
+                {{ csrfInput() }}
+                {{ hiddenInput('uid', payment.uid) }}
+                <button class="qr-pay__report-btn" type="submit">{{ 'I’ve paid'|t('qr-payments') }}</button>
+            </form>
+        {% endif %}
     {% endif %}
 </body>
 </html>

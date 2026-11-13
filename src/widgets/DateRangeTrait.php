@@ -20,9 +20,9 @@ use Carbon\Carbon;
  *
  * The date-range picker (`RANGE_*` handles, `resolveDateRange()`, period
  * wording) shared by every widget that filters by a date range — extracted
- * from `RecentPayments` so `IngredientsCalculator` gets identical behavior
- * via the same `_dateRangeField.twig` component instead of a second copy
- * of this logic.
+ * from `RecentPayments` so other widgets (e.g. the site module's
+ * `IngredientsCalculator`) get identical behavior via the same
+ * `_dateRangeField.twig` component instead of a second copy of this logic.
  *
  * @author      Digitalastronaut
  * @package     QrPayments

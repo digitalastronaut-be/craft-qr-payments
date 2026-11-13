@@ -46,7 +46,7 @@ class SendPaymentReminderEmailJob extends BaseJob {
         $payments = Payment::find()
             // Overpaid isn't included here — that's money we owe the
             // customer back, not a balance still owed to us.
-            ->status([Payment::STATUS_PENDING, Payment::STATUS_EXPIRED, Payment::STATUS_PARTIAL])
+            ->status([Payment::STATUS_PENDING, Payment::STATUS_AWAITING_CONFIRMATION, Payment::STATUS_EXPIRED, Payment::STATUS_PARTIAL])
             ->orderBy(['dueDate' => SORT_ASC])
             ->all();
 

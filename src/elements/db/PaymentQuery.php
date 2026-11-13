@@ -177,7 +177,7 @@ class PaymentQuery extends ElementQuery {
                 ['not', ['qr_payments_payments.dueDate' => null]],
                 ['<', 'qr_payments_payments.dueDate', $now],
             ],
-            Payment::STATUS_PAID, Payment::STATUS_PARTIAL, Payment::STATUS_OVERPAID, Payment::STATUS_CANCELLED, Payment::STATUS_REFUNDED => ['qr_payments_payments.status' => $status],
+            Payment::STATUS_AWAITING_CONFIRMATION, Payment::STATUS_PAID, Payment::STATUS_PARTIAL, Payment::STATUS_OVERPAID, Payment::STATUS_CANCELLED, Payment::STATUS_REFUNDED => ['qr_payments_payments.status' => $status],
             default => parent::statusCondition($status),
         };
     }
@@ -306,9 +306,10 @@ class PaymentQuery extends ElementQuery {
      * Returns one row per year+month that has at least one payment, newest
      * first — used by `Payment::defineSources()` to build the year/month
      * source tree in the element index without hardcoding which periods
-     * actually have payments in them.
+     * actually have payments in them. Each row's `count` badges that
+     * month's source directly, and sums up into its year's badge.
      *
-     * @return array
+     * @return array{year: string, month: string, count: int}[]
      */
     public function groupedByMonth(): array {
         $db = Craft::$app->getDb();
@@ -320,10 +321,11 @@ class PaymentQuery extends ElementQuery {
         $yearExpression = new Expression('EXTRACT(YEAR FROM [[elements.dateCreated]])');
         $monthExpression = new Expression('EXTRACT(MONTH FROM [[elements.dateCreated]])');
 
-        return (clone $query->subQuery)
+        $rows = (clone $query->subQuery)
             ->select([
                 'year' => $yearExpression,
                 'month' => $monthExpression,
+                'count' => new Expression('COUNT(*)'),
             ])
             ->groupBy([$yearExpression, $monthExpression])
             ->orderBy([
@@ -331,5 +333,11 @@ class PaymentQuery extends ElementQuery {
                 'month' => SORT_DESC,
             ])
             ->all();
+
+        foreach ($rows as &$row) {
+            $row['count'] = (int) $row['count'];
+        }
+
+        return $rows;
     }
 }

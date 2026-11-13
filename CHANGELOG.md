@@ -1,5 +1,9 @@
 # Release Notes for QR payments
 
+## 1.6.0-beta - 2026-11-13
+- Added a new `awaiting_confirmation` payment status, sitting between `pending` and `paid`. The public pay page now offers an "I've paid" button (shown while a payment is `pending` or `partial`) that lets the payer flag their own transfer as sent; the site owner still has to verify and confirm it manually from the control panel, same as before. Self-reports are recorded as a new `payer_reported` status history entry, shown in the payment's status history alongside the existing payment/refund/cancellation entries.
+- Moved the "Ingredients calculator" dashboard widget out of this plugin into the site's `site` module — it's bakery recipe/product logic, not QR payment logic, and only read `Payment` elements as its data source.
+
 ## 1.5.1-beta - 2026-11-05
 - Fixed: `confirmedAt`/`confirmedByUserId` were never actually stamped — the 1.4.0-beta changelog entry for this got ahead of the code, and the fields sat unused ever since. A payment reaching `paid` now stamps both from whichever status history entry completed the amount (whether that was a manual "Mark as paid"/"Add payment", or an entry applied from a bank statement import), and clears them again if a refund or cancellation later moves the status away from `paid`. Also now shown on the payment's sidebar info.
 

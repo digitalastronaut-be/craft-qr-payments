@@ -58,6 +58,7 @@ use DateTime;
  */
 class Payment extends Element {
     public const string STATUS_PENDING = 'pending';
+    public const string STATUS_AWAITING_CONFIRMATION = 'reported';
     public const string STATUS_PARTIAL = 'partial';
     public const string STATUS_PAID = 'paid';
     public const string STATUS_OVERPAID = 'overpaid';
@@ -66,6 +67,7 @@ class Payment extends Element {
     public const string STATUS_REFUNDED = 'refunded';
 
     public const string HISTORY_TYPE_PAYMENT = 'payment';
+    public const string HISTORY_TYPE_PAYER_REPORTED = 'payer_reported';
     public const string HISTORY_TYPE_REFUND = 'refund';
     public const string HISTORY_TYPE_CANCELLATION = 'cancellation';
 
@@ -141,6 +143,7 @@ class Payment extends Element {
     public static function statuses(): array {
         return [
             self::STATUS_PENDING => ['label' => Craft::t('qr-payments', 'Pending'), 'color' => Color::Orange],
+            self::STATUS_AWAITING_CONFIRMATION => ['label' => Craft::t('qr-payments', 'Marked paid'), 'color' => Color::Cyan],
             self::STATUS_PARTIAL => ['label' => Craft::t('qr-payments', 'Partially paid'), 'color' => Color::Blue],
             self::STATUS_PAID => ['label' => Craft::t('qr-payments', 'Paid'), 'color' => Color::Teal],
             self::STATUS_OVERPAID => ['label' => Craft::t('qr-payments', 'Overpaid'), 'color' => Color::Red],
@@ -156,6 +159,7 @@ class Payment extends Element {
     public static function historyTypes(): array {
         return [
             self::HISTORY_TYPE_PAYMENT => ['label' => Craft::t('qr-payments', 'Payment'), 'color' => Color::Teal],
+            self::HISTORY_TYPE_PAYER_REPORTED => ['label' => Craft::t('qr-payments', 'Marked as paid by payer'), 'color' => Color::Cyan],
             self::HISTORY_TYPE_REFUND => ['label' => Craft::t('qr-payments', 'Refund'), 'color' => Color::Purple],
             self::HISTORY_TYPE_CANCELLATION => ['label' => Craft::t('qr-payments', 'Cancellation'), 'color' => Color::Gray],
         ];
@@ -209,6 +213,15 @@ class Payment extends Element {
         }
 
         return $this->status;
+    }
+
+    /**
+     * @return bool Whether the payer can self-report this payment as paid —
+     * only while a balance is still outstanding and nothing's been
+     * confirmed or already self-reported.
+     */
+    public function canReportPaidByPayer(): bool {
+        return \in_array($this->getStatus(), [self::STATUS_PENDING, self::STATUS_PARTIAL], true);
     }
 
     /**
@@ -310,6 +323,8 @@ class Payment extends Element {
 
         if ($this->hasHistoryEntryOfType(self::HISTORY_TYPE_REFUND)) return self::STATUS_REFUNDED;
 
+        if ($this->hasHistoryEntryOfType(self::HISTORY_TYPE_PAYER_REPORTED)) return self::STATUS_AWAITING_CONFIRMATION;
+
         return self::STATUS_PENDING;
     }
 
@@ -399,7 +414,7 @@ class Payment extends Element {
             [
                 'key' => 'needs-action',
                 'label' => Craft::t('qr-payments', 'Needs action'),
-                'criteria' => ['status' => [self::STATUS_PENDING, self::STATUS_EXPIRED, self::STATUS_PARTIAL, self::STATUS_OVERPAID]],
+                'criteria' => ['status' => [self::STATUS_PENDING, self::STATUS_AWAITING_CONFIRMATION, self::STATUS_EXPIRED, self::STATUS_PARTIAL, self::STATUS_OVERPAID]],
                 'defaultSort' => ['dueDate', 'asc'],
             ],
             [
@@ -410,6 +425,20 @@ class Payment extends Element {
             ],
         ];
 
+        $sources[] = ['heading' => Craft::t('qr-payments', 'Statuses')];
+
+        $statusCounts = static::find()->statusCounts();
+
+        foreach (static::statuses() as $handle => $def) {
+            $sources[] = [
+                'key' => "status:{$handle}",
+                'label' => $def['label'],
+                'status' => $def['color']->value,
+                'badgeCount' => $statusCounts[$handle] ?? 0,
+                'criteria' => ['status' => $handle],
+            ];
+        }
+
         $sources[] = ['heading' => Craft::t('qr-payments', 'History')];
 
         $grouped = [];
@@ -418,7 +447,10 @@ class Payment extends Element {
             $year = (int) $row['year'];
             $month = (int) $row['month'];
 
-            $grouped[$year][$month] = StringHelper::upperCaseFirst(Craft::$app->getFormatter()->asDate("{$year}-{$month}-01", 'MMMM'));
+            $grouped[$year][$month] = [
+                'label' => StringHelper::upperCaseFirst(Craft::$app->getFormatter()->asDate("{$year}-{$month}-01", 'MMMM')),
+                'count' => $row['count'],
+            ];
         }
 
         krsort($grouped);
@@ -427,22 +459,27 @@ class Payment extends Element {
             krsort($months);
 
             $monthSources = [];
+            $yearCount = 0;
 
-            foreach ($months as $monthNumber => $monthLabel) {
+            foreach ($months as $monthNumber => $month) {
                 $from = sprintf('%04d-%02d-01', $year, $monthNumber);
                 $to = date('Y-m-d', strtotime("$from +1 month"));
 
                 $monthSources[] = [
                     'key' => "month:{$year}-{$monthNumber}",
-                    'label' => $monthLabel,
+                    'label' => $month['label'],
+                    'badgeCount' => $month['count'],
                     'criteria' => ['dateCreated' => ['and', ">= {$from}", "< {$to}"]],
                     'defaultSort' => ['dateCreated', 'desc'],
                 ];
+
+                $yearCount += $month['count'];
             }
 
             $sources[] = [
                 'key' => "year:{$year}",
                 'label' => (string) $year,
+                'badgeCount' => $yearCount,
                 'criteria' => ['dateCreated' => ['and', ">= {$year}-01-01", '< ' . ($year + 1) . '-01-01']],
                 'defaultSort' => ['dateCreated', 'desc'],
                 'nested' => $monthSources,

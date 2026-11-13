@@ -39,7 +39,7 @@ use yii\web\NotFoundHttpException;
  */
 class PaymentsController extends Controller {
     public $defaultAction = 'index';
-    protected array|int|bool $allowAnonymous = ['request', 'pay'];
+    protected array|int|bool $allowAnonymous = ['request', 'pay', 'report-paid'];
 
     /**
      * @return Response
@@ -234,6 +234,36 @@ class PaymentsController extends Controller {
         [$template, $variables, $mode] = $this->payTemplateVariables($payment);
 
         return $this->renderTemplate($template, $variables, $mode);
+    }
+
+    /**
+     * Lets the payer flag, from the public pay page, that they’ve already
+     * transferred the money — moving the payment to `awaiting_confirmation`
+     * until the site owner manually verifies and confirms it.
+     *
+     * `uid` is read from the body rather than bound as an action parameter:
+     * the form posts via the `action` hidden-input override, which bypasses
+     * URL-rule routing entirely, so there's no route-matched `uid` for Yii
+     * to bind here (see `actionRequest()` for the same pattern).
+     *
+     * @return Response
+     */
+    public function actionReportPaid(): Response {
+        $this->requirePostRequest();
+
+        $payment = $this->paymentByUid($this->request->getRequiredBodyParam('uid'));
+
+        if ($payment->canReportPaidByPayer()) {
+            $payment->pushStatusHistoryEntry(Payment::HISTORY_TYPE_PAYER_REPORTED, null, null);
+
+            if (!Craft::$app->getElements()->saveElement($payment)) {
+                $this->setFailFlash(Craft::t('qr-payments', 'Couldn’t update the payment status.'));
+
+                return $this->redirect($payment->getUrl());
+            }
+        }
+
+        return $this->redirect($payment->getUrl());
     }
 
     /**
