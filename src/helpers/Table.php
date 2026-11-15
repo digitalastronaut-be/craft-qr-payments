@@ -22,4 +22,7 @@ use craft\db\Table as CraftTable;
  */
 abstract class Table extends CraftTable {
     public const string QR_PAYMENTS_PAYMENTS = '{{%qr_payments_payments}}';
+    public const string QR_PAYMENTS_PAYMENTTYPES = '{{%qr_payments_paymenttypes}}';
+    public const string QR_PAYMENTS_SUBSCRIPTIONS = '{{%qr_payments_subscriptions}}';
+    public const string QR_PAYMENTS_SUBSCRIPTIONTYPES = '{{%qr_payments_subscriptiontypes}}';
 }

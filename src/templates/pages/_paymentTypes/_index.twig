@@ -1,0 +1,99 @@
+{# @var paymentTypes \digitalastronaut\craftqrpayments\models\PaymentType[] #}
+
+{% extends "qr-payments/pages/_settingsLayout.twig" %}
+
+{% do view.registerAssetBundle('craft\\web\\assets\\admintable\\AdminTableAsset') %}
+
+{% set title = "Payment types"|t('qr-payments') %}
+{% set selectedSettingsNavItem = 'paymentTypes' %}
+
+{% block actionButton %}
+    <a class="btn submit add icon" href="{{ url('qr-payments/payment-types/new') }}">
+        {{ "New payment type"|t('qr-payments') }}
+    </a>
+{% endblock %}
+
+{% block content %}
+    <div id="qrp-paymenttypes-vue-admin-table"></div>
+{% endblock %}
+
+{% set tableData = [] %}
+{% for paymentType in paymentTypes %}
+    {% set customFieldCount = paymentType.getFieldLayout().getCustomFields()|length %}
+    {% set customFieldsLabel = customFieldCount == 1
+        ? (customFieldCount ~ ' ' ~ 'Custom field'|t('qr-payments'))
+        : (customFieldCount ~ ' ' ~ 'Custom fields'|t('qr-payments')) %}
+
+    {% set recipients = paymentType.reminderRecipients
+        ? craft.users.id(paymentType.reminderRecipients).status(null).all()
+        : [] %}
+
+    {% set beneficiaryCard %}
+        {% if paymentType.getBeneficiaryName() or paymentType.getIban() or paymentType.getBic() %}
+            <div class="card" style="min-width: 230px;">
+                <div class="card-titlebar">
+                    <div class="flex flex-nowrap flex-gap-s">
+                        <div class="cp-icon small" aria-hidden="true">{{ iconSvg('credit-card') }}</div>
+                        {% if paymentType.getBeneficiaryName() %}
+                            <div class="card-titlebar-label">{{ paymentType.getBeneficiaryName() }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="card-actions-container"><div class="card-actions"></div></div>
+                </div>
+                <div class="card-main">
+                    <div class="card-content">
+                        <div class="card-body">
+                            {% if paymentType.getIban() %}<div class="card-attribute-preview">{{ paymentType.getIban() }}</div>{% endif %}
+                            {% if paymentType.getBic() %}<div class="card-attribute-preview">{{ paymentType.getBic() }}</div>{% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+    {% endset %}
+
+    {% set recipientChips %}
+        {% if recipients|length %}
+            <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                {% for recipient in recipients %}
+                    {{ elementChip(recipient, { size: 'small' }) }}
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endset %}
+
+    {% set tableData = tableData|merge([{
+        id: paymentType.id,
+        title: paymentType.name,
+        url: url('qr-payments/payment-types/' ~ paymentType.id),
+        handle: paymentType.handle,
+        expirationTime: paymentType.defaultDueDateDays ? (paymentType.defaultDueDateDays ~ ' ' ~ 'days'|t('qr-payments')) : '',
+        referencePrefix: paymentType.referencePrefix,
+        customFields: customFieldsLabel,
+        beneficiary: beneficiaryCard|trim,
+        reminderRecipients: recipientChips|trim,
+    }]) %}
+{% endfor %}
+
+{% js %}
+    new Craft.VueAdminTable({
+        columns: [
+            { name: '__slot:title', title: Craft.t('qr-payments', 'Name'), sortField: true },
+            { name: '__slot:handle', title: Craft.t('qr-payments', 'Handle'), sortField: true },
+            { name: 'beneficiary', title: Craft.t('qr-payments', 'Beneficiary'), callback: (value) => value },
+            { name: 'expirationTime', title: Craft.t('qr-payments', 'Expiration time') },
+            { name: 'referencePrefix', title: Craft.t('qr-payments', 'Reference prefix') },
+            { name: 'customFields', title: Craft.t('qr-payments', 'Custom fields') },
+            { name: 'reminderRecipients', title: Craft.t('qr-payments', 'Reminder recipients'), callback: (value) => value },
+        ],
+        container: '#qrp-paymenttypes-vue-admin-table',
+        emptyMessage: Craft.t('qr-payments', 'No payment types exist yet.'),
+        tableData: {{ tableData|json_encode|raw }},
+        deleteAction: 'qr-payments/payment-types/delete',
+        deleteConfirmationMessage: Craft.t('qr-payments', 'Are you sure you want to delete this payment type?'),
+    });
+
+    setTimeout(() => {
+        Craft.cp.elementThumbLoader.load($('#qrp-paymenttypes-vue-admin-table'));
+    }, 50);
+{% endjs %}

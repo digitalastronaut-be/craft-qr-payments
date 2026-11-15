@@ -35,16 +35,21 @@ use Money\Currency;
 use Money\Money;
 use Money\Parser\DecimalMoneyParser;
 use Money\Currencies\ISOCurrencies;
+use yii\base\InvalidConfigException;
 use yii\web\Response;
 
 use digitalastronaut\craftqrpayments\elements\conditions\PaymentCondition;
 use digitalastronaut\craftqrpayments\elements\db\PaymentQuery;
+use digitalastronaut\craftqrpayments\fieldlayoutelements\PaymentFieldsField;
 use digitalastronaut\craftqrpayments\fieldlayoutelements\StatusHistoryField;
 use digitalastronaut\craftqrpayments\helpers\Table;
+use digitalastronaut\craftqrpayments\jobs\SendPaymentCreatedEmailJob;
 use digitalastronaut\craftqrpayments\jobs\SendPaymentStatusChangedEmailJob;
+use digitalastronaut\craftqrpayments\models\PaymentType;
 use digitalastronaut\craftqrpayments\QrPayments;
 
 use DateTime;
+use Throwable;
 
 /**
  * Class Payment
@@ -75,6 +80,10 @@ class Payment extends Element {
 
     private ?FieldLayout $fieldLayout = null;
 
+    public ?int $typeId = null;
+    public ?int $subscriptionId = null;
+    public ?int $userId = null;
+
     public ?string $email = null;
     public ?string $beneficiaryName = null;
     public ?string $iban = null;
@@ -103,12 +112,134 @@ class Payment extends Element {
     public static function trackChanges(): bool { return true; }
     public static function hasTitles(): bool { return true; }
     public static function hasUris(): bool { return true; }
+    public static function hasDrafts(): bool { return true; }
     public static function isLocalized(): bool { return false; }
     public static function hasStatuses(): bool { return true; }
 
     public function canDuplicate(User $user): bool { return false; }
 
-    public function canCreateDrafts(User $user): bool { return false; }
+    /**
+     * @param User $user
+     * @return bool
+     */
+    public function canCreateDrafts(User $user): bool {
+        if (parent::canCreateDrafts($user)) return true;
+        return $user->can('qr-payments:access-payments');
+    }
+
+    /**
+     * Defaults a freshly-constructed, not-yet-typed Payment to
+     * `PaymentTypesService::getDefaultPaymentType()`. Transitional:
+     * `PaymentsService::createPayment()` doesn't accept an explicit type yet (see
+     * PAYMENT_TYPES_AND_SUBSCRIPTIONS_PLAN.md phase 1, step 9) — once it
+     * does, callers will set `typeId` themselves and this becomes a no-op
+     * for them. Elements hydrated from the database already have `typeId`
+     * populated before `init()` runs, so this never overrides a real value.
+     *
+     * @inheritdoc
+     */
+    public function init(): void {
+        parent::init();
+
+        $this->typeId ??= QrPayments::getInstance()->getPaymentTypes()->getDefaultPaymentType()?->id;
+    }
+
+    /**
+     * Called from both `beforeValidate()` and `beforeSave()`: the former so
+     * a standalone `validate()` call (e.g. the edit screen's "prevalidate"
+     * pass, which runs with no save involved) doesn't flag these as missing;
+     * the latter because `beforeSave()` actually runs *before* `validate()`
+     * within the same save cycle, so `generateQrCode()` (gated on
+     * `$this->firstSave`, further down in `beforeSave()`) can't rely on a
+     * same-cycle `beforeValidate()` call having populated `beneficiaryName`/
+     * `iban` yet — it needs them derived right there too. `??=` throughout
+     * makes calling this twice in one cycle harmless.
+     *
+     * @return void
+     */
+    private function deriveFromType(): void {
+        $type = $this->getType();
+
+        $this->beneficiaryName ??= $type->getBeneficiaryName();
+        $this->iban ??= $type->getIban();
+        $this->bic ??= $type->getBic();
+        $this->dueDate ??= DateTimeHelper::currentUTCDateTime()->modify("+{$type->defaultDueDateDays} days");
+        $this->remittanceReference ??= QrPayments::getInstance()->getPayments()->generateUniqueReference($type->referencePrefix);
+        $this->title = $this->remittanceReference;
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function beforeValidate(): bool {
+        $this->deriveFromType();
+
+        return parent::beforeValidate();
+    }
+
+    /**
+     * @return PaymentType
+     * @throws InvalidConfigException if `typeId` doesn't resolve to a real PaymentType
+     */
+    public function getType(): PaymentType {
+        $paymentType = $this->typeId !== null
+            ? QrPayments::getInstance()->getPaymentTypes()->getPaymentTypeById($this->typeId)
+            : null;
+
+        if ($paymentType === null) {
+            throw new InvalidConfigException("Invalid payment type ID: {$this->typeId}");
+        }
+
+        return $paymentType;
+    }
+
+    /**
+     * @return Subscription|null The subscription that generated this
+     * payment via `SubscriptionsService::advance()`, or null for a
+     * one-off payment.
+     */
+    public function getSubscription(): ?Subscription {
+        return $this->subscriptionId !== null
+            ? Subscription::find()->id($this->subscriptionId)->status(null)->one()
+            : null;
+    }
+
+    /**
+     * Normalizes the request-posted shape for `userId` (the element-select
+     * field's "nothing selected" placeholder quirk) before Craft's generic
+     * mass assignment (`setAttributes()`) handles the rest — same gotcha
+     * `Subscription::setAttributesFromRequest()` works around.
+     *
+     * @inheritdoc
+     */
+    public function setAttributesFromRequest(array $values): void {
+        if (\array_key_exists('userId', $values)) {
+            $ids = \is_array($values['userId']) ? $values['userId'] : ($values['userId'] === '' ? [] : (array) $values['userId']);
+            $values['userId'] = $ids ? (int) $ids[0] : null;
+        }
+
+        parent::setAttributesFromRequest($values);
+    }
+
+    /**
+     * @return User|null The linked Craft user, when one is set. Null for a
+     * guest payment running on `email` alone.
+     */
+    public function getOwner(): ?User {
+        return $this->userId !== null ? Craft::$app->getUsers()->getUserById($this->userId) : null;
+    }
+
+    /**
+     * Prefers the owner's current account email over the `email` snapshot,
+     * so notifications don't go stale if the account's address changes
+     * after the payment was created. Falls back to the snapshot for a
+     * guest payment — same split `Subscription::getNotificationEmail()` uses.
+     *
+     * @return string|null
+     */
+    public function getNotificationEmail(): ?string {
+        return $this->getOwner()?->email ?? $this->email;
+    }
 
     /**
      * @param User $user
@@ -272,10 +403,49 @@ class Payment extends Element {
      * @inheritdoc
      */
     public function beforeSave(bool $isNew): bool {
+        // `beforeSave()` runs *before* `validate()` within the same save
+        // cycle, so this can't rely on a same-cycle `beforeValidate()` call
+        // having already derived `beneficiaryName`/`iban`/etc — see
+        // `deriveFromType()`'s docblock.
+        $this->deriveFromType();
+
+        // `$this->firstSave` (set by Craft core — see `Elements::saveElement()`)
+        // is true exactly once: the save that turns this from a draft (or a
+        // request-scoped `new Payment()`, for `PaymentsService::createPayment()`)
+        // into the real, canonical payment — whether that's the "apply draft"
+        // step of the native CP create flow, or a direct console/queue save.
+        // By now `amount` is either already validated (the CP draft flow's
+        // apply step) or set directly by the caller (`createPayment()`), so
+        // this is the right — and only — moment to generate the QR code and
+        // fire the "payment created" notification (in `afterSave()`).
+        if ($this->firstSave && !$this->generateQrCode()) return false;
+
         $this->status = $this->computeStatus();
         $this->syncConfirmation();
 
         return parent::beforeSave($isNew);
+    }
+
+    /**
+     * @return bool false if the EPC QR code couldn't be generated (e.g. invalid beneficiary/IBAN/BIC settings), aborting the save with a validation error
+     */
+    private function generateQrCode(): bool {
+        try {
+            $this->qrCode = QrPayments::getInstance()->getEpcQr()->generateQrCode(
+                beneficiaryName: $this->beneficiaryName,
+                iban: $this->iban,
+                amount: (float) MoneyHelper::toDecimal($this->getAmount()),
+                bic: $this->bic,
+                remittanceReference: $this->remittanceReference,
+            )->getString();
+
+            return true;
+        } catch (Throwable $e) {
+            Craft::error($e->getMessage(), __METHOD__);
+            $this->addError('amount', Craft::t('qr-payments', 'Could not generate the payment QR code: {message}', ['message' => $e->getMessage()]));
+
+            return false;
+        }
     }
 
     /**
@@ -406,28 +576,34 @@ class Payment extends Element {
      * @return array[]
      */
     protected static function defineSources(string $context): array {
+        $statusCounts = static::find()->statusCounts();
+
+        $needsActionStatuses = [self::STATUS_PENDING, self::STATUS_AWAITING_CONFIRMATION, self::STATUS_EXPIRED, self::STATUS_PARTIAL, self::STATUS_OVERPAID];
+        $resolvedStatuses = [self::STATUS_PAID, self::STATUS_CANCELLED, self::STATUS_REFUNDED];
+
         $sources = [
             [
                 'key' => 'all',
                 'label' => Craft::t('qr-payments', 'All payments'),
+                'badgeCount' => array_sum($statusCounts),
             ],
             [
                 'key' => 'needs-action',
                 'label' => Craft::t('qr-payments', 'Needs action'),
-                'criteria' => ['status' => [self::STATUS_PENDING, self::STATUS_AWAITING_CONFIRMATION, self::STATUS_EXPIRED, self::STATUS_PARTIAL, self::STATUS_OVERPAID]],
+                'criteria' => ['status' => $needsActionStatuses],
                 'defaultSort' => ['dueDate', 'asc'],
+                'badgeCount' => array_sum(array_intersect_key($statusCounts, array_flip($needsActionStatuses))),
             ],
             [
                 'key' => 'resolved',
                 'label' => Craft::t('qr-payments', 'Resolved'),
-                'criteria' => ['status' => [self::STATUS_PAID, self::STATUS_CANCELLED, self::STATUS_REFUNDED]],
+                'criteria' => ['status' => $resolvedStatuses],
                 'defaultSort' => ['dateCreated', 'desc'],
+                'badgeCount' => array_sum(array_intersect_key($statusCounts, array_flip($resolvedStatuses))),
             ],
         ];
 
         $sources[] = ['heading' => Craft::t('qr-payments', 'Statuses')];
-
-        $statusCounts = static::find()->statusCounts();
 
         foreach (static::statuses() as $handle => $def) {
             $sources[] = [
@@ -556,8 +732,21 @@ class Payment extends Element {
      */
     protected function defineRules(): array {
         return array_merge(parent::defineRules(), [
-            [['email', 'beneficiaryName', 'iban', 'amount', 'remittanceReference'], 'required'],
+            // Excludes SCENARIO_ESSENTIALS — same reasoning as
+            // `Subscription::defineRules()` — so the very first save of a
+            // brand-new unpublished draft succeeds before the payer/operator
+            // has entered either one yet.
+            [['email', 'amount'], 'required', 'on' => [self::SCENARIO_DEFAULT, self::SCENARIO_LIVE]],
 
+            // Always required, but never user-entered: `beforeValidate()`
+            // derives all of these from the `PaymentType` (or, for
+            // `remittanceReference`, generates one) before this rule ever runs.
+            [['typeId', 'beneficiaryName', 'iban', 'remittanceReference'], 'required'],
+
+            [['typeId'], 'integer'],
+            [['subscriptionId'], 'integer'],
+            [['userId'], 'integer'],
+            [['userId'], 'validateOwnerExists'],
             [['email'], 'email'],
             [['email'], 'string', 'max' => 255],
             [['beneficiaryName'], 'string', 'max' => 70],
@@ -593,6 +782,20 @@ class Payment extends Element {
                 'min' => MoneyHelper::toString($min),
                 'max' => MoneyHelper::toString($max),
             ]));
+        }
+    }
+
+    /**
+     * @param string $attribute
+     * @return void
+     */
+    public function validateOwnerExists(string $attribute): void {
+        $id = $this->$attribute;
+
+        if ($id === null) return;
+
+        if (!User::find()->id($id)->status(null)->exists()) {
+            $this->addError($attribute, Craft::t('qr-payments', 'Could not find the selected user.'));
         }
     }
 
@@ -658,29 +861,40 @@ class Payment extends Element {
     }
 
     /**
+     * One rendered layout per PaymentType — each is that type's custom
+     * field layout with the native `StatusHistoryField` prepended, same
+     * shape `getFieldLayout()` builds for a single instance below.
+     *
      * @param string|null $source
      * @return FieldLayout[]
      */
     protected static function defineFieldLayouts(?string $source): array {
+        $paymentTypes = QrPayments::getInstance()->getPaymentTypes()->getAllPaymentTypes();
+
+        return array_map(
+            static fn(PaymentType $paymentType) => self::buildFieldLayout($paymentType->getFieldLayout()),
+            $paymentTypes,
+        );
+    }
+
+    /**
+     * @param FieldLayout $customLayout A PaymentType's own (custom-fields-only) layout.
+     * @return FieldLayout The full rendered layout: `PaymentFieldsField` (email/amount —
+     * only while still an unpublished draft) + `StatusHistoryField` + that type's custom fields.
+     */
+    private static function buildFieldLayout(FieldLayout $customLayout): FieldLayout {
         $layout = new FieldLayout(['type' => static::class]);
         $tab = new FieldLayoutTab(['name' => Craft::t('qr-payments', 'Payment'), 'layout' => $layout]);
-        $elements = [new StatusHistoryField()];
+        $elements = [new PaymentFieldsField(), new StatusHistoryField()];
 
-        foreach (static::getCustomFieldLayout()->getTabs() as $customTab) {
+        foreach ($customLayout->getTabs() as $customTab) {
             array_push($elements, ...$customTab->getElements());
         }
 
         $tab->setElements($elements);
         $layout->setTabs([$tab]);
 
-        return [$layout];
-    }
-
-    /**
-     * @return FieldLayout
-     */
-    public static function getCustomFieldLayout(): FieldLayout {
-        return Craft::$app->getFields()->getLayoutByType(static::class);
+        return $layout;
     }
 
     /**
@@ -689,9 +903,7 @@ class Payment extends Element {
     public function getFieldLayout(): ?FieldLayout {
         if ($this->fieldLayout !== null) return $this->fieldLayout;
 
-        $this->fieldLayout = static::defineFieldLayouts(null)[0] ?? null;
-
-        return $this->fieldLayout;
+        return $this->fieldLayout = self::buildFieldLayout($this->getType()->getFieldLayout());
     }
 
     /**
@@ -939,10 +1151,15 @@ class Payment extends Element {
      */
     public function afterSave(bool $isNew): void {
         if (!$this->propagating) {
-            $this->notifyStatusChange($isNew);
+            // Must read the previous status before the upsert below
+            // overwrites it.
+            $this->notifyStatusChange();
 
             Db::upsert(Table::QR_PAYMENTS_PAYMENTS, [
                 'id' => $this->id,
+                'typeId' => $this->typeId,
+                'subscriptionId' => $this->subscriptionId,
+                'userId' => $this->userId,
                 'email' => $this->email,
                 'beneficiaryName' => $this->beneficiaryName,
                 'iban' => $this->iban,
@@ -957,6 +1174,9 @@ class Payment extends Element {
                 'confirmedAt' => Db::prepareDateForDb($this->confirmedAt),
                 'confirmedByUserId' => $this->confirmedByUserId,
             ], [
+                'typeId' => $this->typeId,
+                'subscriptionId' => $this->subscriptionId,
+                'userId' => $this->userId,
                 'email' => $this->email,
                 'beneficiaryName' => $this->beneficiaryName,
                 'iban' => $this->iban,
@@ -971,28 +1191,51 @@ class Payment extends Element {
                 'confirmedAt' => Db::prepareDateForDb($this->confirmedAt),
                 'confirmedByUserId' => $this->confirmedByUserId,
             ]);
+
+            // Must run after the upsert above: `SendPaymentCreatedEmailJob`
+            // re-fetches the payment from the DB rather than using this
+            // in-memory instance, so it needs the just-generated `qrCode`
+            // (and everything else) to already be persisted.
+            if ($this->firstSave) $this->notifyCreated();
         }
 
         parent::afterSave($isNew);
     }
 
     /**
-     * @param bool $isNew
+     * Uses `$this->firstSave` rather than the generic Craft-level `$isNew`
+     * flag passed into `afterSave()`: a payment created through the native
+     * draft flow already has an element row (and so an element-level
+     * `$isNew = false`) by the time it's actually created — see
+     * `beforeSave()` for the full explanation of `firstSave`.
+     *
      * @return void
      */
-    private function notifyStatusChange(bool $isNew): void {
-        $previousStatus = $isNew ? null : (new Query())
+    private function notifyStatusChange(): void {
+        if ($this->firstSave) return;
+
+        $previousStatus = (new Query())
             ->select(['status'])
             ->from(Table::QR_PAYMENTS_PAYMENTS)
             ->where(['id' => $this->id])
             ->scalar();
 
-        if ($isNew || $previousStatus === $this->status || !$this->email) return;
+        if ($previousStatus === $this->status || !$this->email) return;
 
         Craft::$app->getQueue()->push(new SendPaymentStatusChangedEmailJob([
             'paymentId' => $this->id,
             'previousStatus' => $previousStatus,
         ]));
+
+        App::maxPowerCaptain();
+        Craft::$app->queue->run();
+    }
+
+    /**
+     * @return void
+     */
+    private function notifyCreated(): void {
+        Craft::$app->getQueue()->push(new SendPaymentCreatedEmailJob(['paymentId' => $this->id]));
 
         App::maxPowerCaptain();
         Craft::$app->queue->run();

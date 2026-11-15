@@ -12,72 +12,97 @@
 namespace digitalastronaut\craftqrpayments\jobs;
 
 use Craft;
-use craft\queue\BaseJob;
-use craft\queue\QueueInterface;
 use craft\web\View;
 
 use digitalastronaut\craftqrpayments\elements\Payment;
-use digitalastronaut\craftqrpayments\QrPayments;
 
 use RuntimeException;
 
 /**
  * Class SendPaymentReminderEmailJob
  *
- * Queued once per `ReminderController::actionSend()` run, carrying every
- * recipient's email address. The digest content is the same for everyone,
- * so the template is rendered once here and sent individually to each
- * recipient — payments needing action are looked up fresh at execute()
- * time, the same way the "Needs action" element source does.
+ * The payer-facing nudge — distinct from the admin-facing
+ * `SendPaymentsSummaryEmailJob` digest. Queued once per qualifying
+ * payment by `ReminderController::actionSend()`: once when it's exactly
+ * 7 days from its due date, and again on the day it first becomes
+ * expired. The template branches on `payment.getStatus()` (same `if`/
+ * `else` pattern `_pay.twig` uses) to show "due soon" vs "overdue" copy
+ * from a single file, rather than needing two separate templates.
  *
  * @author      Digitalastronaut
  * @package     QrPayments
- * @since       v1.5.0-beta
+ * @since       v1.6.0-beta
  */
-class SendPaymentReminderEmailJob extends BaseJob {
-    /** @var string[] */
-    public array $recipientEmails = [];
+class SendPaymentReminderEmailJob extends SendTemplatedEmailJob {
+    public int $paymentId;
+
+    private ?Payment $payment = null;
 
     /**
-     * @param QueueInterface $queue
-     * @return void
+     * See `SendPaymentCreatedEmailJob::__sleep()` — same reason: excludes
+     * the lazily-cached `$payment` (and its own cached, closure-bearing
+     * custom field layout) from serialization, since `Queue::push()`
+     * populates it via `getDescription()` before the job is serialized.
+     *
+     * @return string[]
      */
-    public function execute($queue): void {
-        $payments = Payment::find()
-            // Overpaid isn't included here — that's money we owe the
-            // customer back, not a balance still owed to us.
-            ->status([Payment::STATUS_PENDING, Payment::STATUS_AWAITING_CONFIRMATION, Payment::STATUS_EXPIRED, Payment::STATUS_PARTIAL])
-            ->orderBy(['dueDate' => SORT_ASC])
-            ->all();
+    public function __sleep(): array {
+        return ['paymentId'];
+    }
 
-        if (!$payments || !$this->recipientEmails) return;
+    /**
+     * @return string
+     */
+    protected function getTemplate(): string {
+        $override = $this->getPayment()->getType()->paymentReminderTemplate;
 
-        $override = QrPayments::getInstance()->getSettings()->paymentReminderTemplate;
-        $template = $override !== '' ? $override : 'qr-payments/emails/_paymentReminder';
-        $mode = $override !== '' ? View::TEMPLATE_MODE_SITE : View::TEMPLATE_MODE_CP;
+        return $override !== '' ? $override : 'qr-payments/emails/_paymentReminder';
+    }
 
-        $html = Craft::$app->getView()->renderTemplate($template, ['payments' => $payments], $mode);
+    /**
+     * @return string
+     */
+    protected function getTemplateMode(): string {
+        $override = $this->getPayment()->getType()->paymentReminderTemplate;
 
-        $subject = Craft::t('qr-payments', '{count} payment(s) still need to be processed', [
-            'count' => count($payments),
-        ]);
+        return $override !== '' ? View::TEMPLATE_MODE_SITE : View::TEMPLATE_MODE_CP;
+    }
 
-        foreach ($this->recipientEmails as $email) {
-            $message = Craft::$app->getMailer()->compose()
-                ->setTo($email)
-                ->setSubject($subject)
-                ->setHtmlBody($html);
-
-            if (!$message->send()) {
-                throw new RuntimeException("Mailer refused to send \"{$template}\" to {$email}.");
-            }
-        }
+    /**
+     * @return array
+     */
+    protected function getTemplateVariables(): array {
+        return ['payment' => $this->getPayment()];
     }
 
     /**
      * @return string|null
      */
-    protected function defaultDescription(): ?string {
-        return Craft::t('qr-payments', 'Sending payment reminder emails');
+    protected function getRecipient(): ?string {
+        return $this->getPayment()->getNotificationEmail() ?: null;
+    }
+
+    /**
+     * @return string
+     */
+    protected function getSubject(): string {
+        $payment = $this->getPayment();
+
+        return $payment->getStatus() === Payment::STATUS_EXPIRED
+            ? Craft::t('qr-payments', 'Your payment {reference} is overdue', ['reference' => $payment->remittanceReference])
+            : Craft::t('qr-payments', 'Your payment {reference} is due soon', ['reference' => $payment->remittanceReference]);
+    }
+
+    /**
+     * @return Payment
+     */
+    private function getPayment(): Payment {
+        if ($this->payment !== null) return $this->payment;
+
+        $payment = Payment::find()->id($this->paymentId)->one();
+
+        if (!$payment) throw new RuntimeException("No payment found with id {$this->paymentId}.");
+
+        return $this->payment = $payment;
     }
 }

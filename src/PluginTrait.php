@@ -26,7 +26,9 @@ use craft\web\View;
 
 use yii\base\Event;
 
+use digitalastronaut\craftqrpayments\controllers\SubscriptionsController;
 use digitalastronaut\craftqrpayments\elements\Payment;
+use digitalastronaut\craftqrpayments\elements\Subscription;
 use digitalastronaut\craftqrpayments\variables\QrPaymentsVariable;
 use digitalastronaut\craftqrpayments\web\assets\admin\AdminAssetBundle;
 use digitalastronaut\craftqrpayments\widgets\RecentPayments;
@@ -99,6 +101,7 @@ trait PluginTrait {
             Elements::EVENT_REGISTER_ELEMENT_TYPES,
             function(RegisterComponentTypesEvent $event) {
                 $event->types[] = Payment::class;
+                $event->types[] = Subscription::class;
             }
         );
     }
@@ -130,6 +133,9 @@ trait PluginTrait {
                         'qr-payments:access-payments' => [
                             'label' => Craft::t('qr-payments', 'Access payments'),
                         ],
+                        SubscriptionsController::PERMISSION_MANAGE_SUBSCRIPTIONS => [
+                            'label' => Craft::t('qr-payments', 'Manage subscriptions'),
+                        ],
                     ],
                 ];
             }
@@ -160,10 +166,24 @@ trait PluginTrait {
             function(RegisterUrlRulesEvent $event) {
                 $event->rules['qr-payments'] = 'qr-payments/payments/index';
                 $event->rules['qr-payments/payments'] = 'qr-payments/payments/index';
-                $event->rules['qr-payments/payments/new'] = 'qr-payments/payments/create';
                 $event->rules['qr-payments/payments/process'] = 'qr-payments/process/index';
                 $event->rules['qr-payments/payments/<elementId:\d+>'] = 'elements/edit';
                 $event->rules['qr-payments/settings'] = 'qr-payments/settings/index';
+                $event->rules['qr-payments/payment-types'] = 'qr-payments/payment-types/index';
+                $event->rules['qr-payments/payment-types/new'] = 'qr-payments/payment-types/edit';
+                $event->rules['qr-payments/payment-types/save'] = 'qr-payments/payment-types/save';
+                $event->rules['qr-payments/payment-types/delete'] = 'qr-payments/payment-types/delete';
+                $event->rules['qr-payments/payment-types/<paymentTypeId:\d+>'] = 'qr-payments/payment-types/edit';
+                $event->rules['qr-payments/subscription-types'] = 'qr-payments/subscription-types/index';
+                $event->rules['qr-payments/subscription-types/new'] = 'qr-payments/subscription-types/edit';
+                $event->rules['qr-payments/subscription-types/save'] = 'qr-payments/subscription-types/save';
+                $event->rules['qr-payments/subscription-types/delete'] = 'qr-payments/subscription-types/delete';
+                $event->rules['qr-payments/subscription-types/<subscriptionTypeId:\d+>'] = 'qr-payments/subscription-types/edit';
+                $event->rules['qr-payments/subscriptions'] = 'qr-payments/subscriptions/index';
+                $event->rules['qr-payments/subscriptions/activate'] = 'qr-payments/subscriptions/activate';
+                $event->rules['qr-payments/subscriptions/pause'] = 'qr-payments/subscriptions/pause';
+                $event->rules['qr-payments/subscriptions/cancel'] = 'qr-payments/subscriptions/cancel';
+                $event->rules['qr-payments/subscriptions/<elementId:\d+>'] = 'elements/edit';
             }
         );
     }

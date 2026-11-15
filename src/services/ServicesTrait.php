@@ -33,6 +33,9 @@ trait ServicesTrait {
             'components' => [
                 'epcQr' => EpcQrService::class,
                 'payments' => PaymentsService::class,
+                'paymentTypes' => PaymentTypesService::class,
+                'subscriptions' => SubscriptionsService::class,
+                'subscriptionTypes' => SubscriptionTypesService::class,
                 'vite' => [
                     'class' => QrPaymentsViteService::class,
                     'assetClass' => AdminAssetBundle::class,
@@ -67,5 +70,26 @@ trait ServicesTrait {
      */
     public function getPayments(): PaymentsService {
         return $this->get('payments');
+    }
+
+    /**
+     * @return PaymentTypesService
+     */
+    public function getPaymentTypes(): PaymentTypesService {
+        return $this->get('paymentTypes');
+    }
+
+    /**
+     * @return SubscriptionsService
+     */
+    public function getSubscriptions(): SubscriptionsService {
+        return $this->get('subscriptions');
+    }
+
+    /**
+     * @return SubscriptionTypesService
+     */
+    public function getSubscriptionTypes(): SubscriptionTypesService {
+        return $this->get('subscriptionTypes');
     }
 }

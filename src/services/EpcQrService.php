@@ -64,7 +64,7 @@ class EpcQrService extends Component {
 
         if (!iban_country_is_sepa(iban_get_country_part($iban))) {
             throw new InvalidArgumentException(
-                Craft::t('qr-payments', 'IBAN {iban} is not from a SEPA country. EPC QR payments only support SEPA credit transfers.', 
+                Craft::t('qr-payments', 'IBAN {iban} is not from a SEPA country. EPC QR payments only support SEPA credit transfers.',
                 ['iban' => $iban]
             ));
         }

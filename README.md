@@ -140,6 +140,16 @@ The reminder digest has no built-in scheduler; wire a cron job to:
 php craft qr-payments/reminder/send
 ```
 
+### Subscriptions
+
+A subscription is a recurrence schedule, not a gateway integration: it stamps out the next `Payment` on a cadence, same as any other payment, for you to reconcile manually. Advancing has no built-in scheduler either; wire a cron job to:
+
+```bash
+php craft qr-payments/subscription/advance
+```
+
+Run it at least daily. Each run advances every active subscription whose `nextDueDate` has arrived, creating that cycle's payment and pushing `nextDueDate` forward by the subscription's interval.
+
 ### Customizing the pay page
 
 Point **Settings → Payment page → Pay page template** at your own site template instead of the bundled one. The redirect target (`/qr-payments/payments/<uid>/pay`, or a route you've renamed under **Pay page route**) stays the same — your template just receives the same `payment` element and a ready-to-use `qrCodeDataUri`.

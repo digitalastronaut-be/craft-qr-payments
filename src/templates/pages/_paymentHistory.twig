@@ -12,12 +12,24 @@
 
 {% set additionalButtons %}
     <a class="btn" href="{{ url('qr-payments/payments/process') }}">
-        {{ "Process payments"|t('qr-payments') }}
+        {{ "Bulk processing"|t('qr-payments') }}
     </a>
 {% endset %}
 
 {% block actionButton %}
-    <a class="btn submit add icon" href="{{ url('qr-payments/payments/new') }}">
+    <button type="button" class="btn submit add icon" id="qrp-new-payment">
         {{ "New payment"|t('qr-payments') }}
-    </a>
+    </button>
 {% endblock %}
+
+{% js %}
+    document.getElementById('qrp-new-payment').addEventListener('click', () => {
+        Craft.sendActionRequest('POST', 'elements/create', {
+            data: { elementType: '{{ elementType|e("js") }}' },
+        }).then((response) => {
+            document.location.href = Craft.getUrl(response.data.cpEditUrl, { fresh: 1 });
+        }).catch((error) => {
+            Craft.cp.displayError(error?.response?.data?.message);
+        });
+    });
+{% endjs %}

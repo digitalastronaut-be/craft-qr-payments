@@ -15,7 +15,6 @@ use Craft;
 use craft\web\View;
 
 use digitalastronaut\craftqrpayments\elements\Payment;
-use digitalastronaut\craftqrpayments\QrPayments;
 
 use RuntimeException;
 
@@ -33,10 +32,22 @@ class SendPaymentStatusChangedEmailJob extends SendTemplatedEmailJob {
     private ?Payment $payment = null;
 
     /**
+     * See `SendPaymentCreatedEmailJob::__sleep()` — same reason: excludes
+     * the lazily-cached `$payment` (and its own cached, closure-bearing
+     * custom field layout) from serialization, since `Queue::push()`
+     * populates it via `getDescription()` before the job is serialized.
+     *
+     * @return string[]
+     */
+    public function __sleep(): array {
+        return ['paymentId', 'previousStatus'];
+    }
+
+    /**
      * @return string
      */
     protected function getTemplate(): string {
-        $override = QrPayments::getInstance()->getSettings()->paymentStatusChangedTemplate;
+        $override = $this->getPayment()->getType()->paymentStatusChangedTemplate;
 
         return $override !== '' ? $override : 'qr-payments/emails/_statusChanged';
     }
@@ -45,7 +56,7 @@ class SendPaymentStatusChangedEmailJob extends SendTemplatedEmailJob {
      * @return string
      */
     protected function getTemplateMode(): string {
-        $override = QrPayments::getInstance()->getSettings()->paymentStatusChangedTemplate;
+        $override = $this->getPayment()->getType()->paymentStatusChangedTemplate;
 
         return $override !== '' ? View::TEMPLATE_MODE_SITE : View::TEMPLATE_MODE_CP;
     }
@@ -68,7 +79,7 @@ class SendPaymentStatusChangedEmailJob extends SendTemplatedEmailJob {
      * @return string|null
      */
     protected function getRecipient(): ?string {
-        return $this->getPayment()->email ?: null;
+        return $this->getPayment()->getNotificationEmail() ?: null;
     }
 
     /**

@@ -3,36 +3,30 @@
 {# ======================= #}
 {% extends "qr-payments/emails/_layout" %}
 
-{# @var payments \digitalastronaut\craftqrpayments\elements\Payment[] #}
+{# @var payment \digitalastronaut\craftqrpayments\elements\Payment #}
+
+{% set status = payment.getStatus() %}
 
 {# ======================= #}
 {# TEMPLATE                #}
 {# ======================= #}
 {% block content %}
-    <h2 style="{{ heading2Style }}">{{ "Payments still awaiting processing"|t('qr-payments') }}</h2>
+    {% if status == 'expired' %}
+        <h2 style="{{ heading2Style }}">{{ "Your payment is overdue"|t('qr-payments') }}</h2>
+        <p style="{{ textStyle }}">{{ "The due date for the following payment has passed. Please settle it as soon as possible:"|t('qr-payments') }}</p>
+    {% else %}
+        <h2 style="{{ heading2Style }}">{{ "Your payment is due soon"|t('qr-payments') }}</h2>
+        <p style="{{ textStyle }}">{{ "This is a friendly reminder that the following payment is due in 7 days:"|t('qr-payments') }}</p>
+    {% endif %}
 
-    <p style="{{ textStyle }}">
-        {{ "The following {count} payment(s) are still pending and haven’t been matched to a bank transfer yet:"|t('qr-payments', { count: payments|length }) }}
-    </p>
+    <ul>
+        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Beneficiary:"|t('qr-payments') }}</span>{{ payment.beneficiaryName }}</li>
+        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "IBAN:"|t('qr-payments') }}</span>{{ payment.iban }}</li>
+        {% if payment.bic %}<li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "BIC:"|t('qr-payments') }}</span>{{ payment.bic }}</li>{% endif %}
+        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Amount:"|t('qr-payments') }}</span>{{ payment.amount|money }}</li>
+        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Reference:"|t('qr-payments') }}</span>{{ payment.remittanceReference }}</li>
+        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Due date:"|t('qr-payments') }}</span>{{ payment.dueDate|date('Y-m-d') }}</li>
+    </ul>
 
-    <table style="width: 100%; border-collapse: collapse;">
-        <thead>
-            <tr>
-                <th style="{{ tableHeaderStyle }}">{{ "Reference"|t('qr-payments') }}</th>
-                <th style="{{ tableHeaderStyle }}">{{ "Amount"|t('qr-payments') }}</th>
-                <th style="{{ tableHeaderStyle }}">{{ "Due date"|t('qr-payments') }}</th>
-                <th style="{{ tableHeaderStyle }}">{{ "Email"|t('qr-payments') }}</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for payment in payments %}
-                <tr>
-                    <td style="{{ tableCellStyle }}"><a href="{{ payment.getCpEditUrl() }}">{{ payment.remittanceReference }}</a></td>
-                    <td style="{{ tableCellStyle }}">{{ payment.amount|money }}</td>
-                    <td style="{{ tableCellStyle }}">{{ payment.dueDate ? payment.dueDate|date('Y-m-d') : '—' }}</td>
-                    <td style="{{ tableCellStyle }}">{{ payment.email }}</td>
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <p style="{{ textStyle }}"><a href="{{ payment.getUrl() }}">{{ "View payment"|t('qr-payments') }}</a></p>
 {% endblock %}

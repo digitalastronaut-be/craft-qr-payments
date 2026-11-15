@@ -1,0 +1,29 @@
+{% extends "_layouts/elementindex" %}
+
+{% set selectedSubnavItem = 'subscriptions' %}
+
+{% set title = "Subscriptions"|t('qr-payments') %}
+{% set elementType = 'digitalastronaut\\craftqrpayments\\elements\\Subscription' %}
+
+{% set crumbs = [
+    { label: 'QR payments'|t('qr-payments'), url: url('qr-payments') },
+    { label: 'Subscriptions'|t('qr-payments'), url: url('qr-payments/subscriptions') },
+] %}
+
+{% block actionButton %}
+    <button type="button" class="btn submit add icon" id="qrp-new-subscription">
+        {{ "New subscription"|t('qr-payments') }}
+    </button>
+{% endblock %}
+
+{% js %}
+    document.getElementById('qrp-new-subscription').addEventListener('click', () => {
+        Craft.sendActionRequest('POST', 'elements/create', {
+            data: { elementType: '{{ elementType|e("js") }}' },
+        }).then((response) => {
+            document.location.href = Craft.getUrl(response.data.cpEditUrl, { fresh: 1 });
+        }).catch((error) => {
+            Craft.cp.displayError(error?.response?.data?.message);
+        });
+    });
+{% endjs %}

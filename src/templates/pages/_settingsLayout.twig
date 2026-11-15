@@ -1,0 +1,29 @@
+{# Shared chrome for the Settings area: General, Payment types, and
+   Subscription types all live under one secondary sidebar nav rather than
+   the top-level CP nav — they're full CRUD sub-pages with their own real
+   URLs, not same-page tab panes, so this is the `_includes/nav.twig`
+   idiom (same pattern Craft core's own `settings/users/_layout.twig`
+   uses), not a `tabs` variable. #}
+
+{% extends "_layouts/cp.twig" %}
+
+{% set selectedSubnavItem = 'settings' %}
+
+{% set crumbs = [
+    { label: 'QR payments'|t('qr-payments'), url: url('qr-payments') },
+    { label: 'Settings'|t('qr-payments'), url: url('qr-payments/settings') },
+] %}
+
+{% set settingsNavItems = {
+    general: { label: 'General'|t('qr-payments'), url: url('qr-payments/settings') },
+    paymentTypes: { label: 'Payment types'|t('qr-payments'), url: url('qr-payments/payment-types') },
+    subscriptionTypes: { label: 'Subscription types'|t('qr-payments'), url: url('qr-payments/subscription-types') },
+} %}
+
+{% block sidebar %}
+    {% include "_includes/nav.twig" with {
+        label: 'Settings'|t('qr-payments'),
+        items: settingsNavItems,
+        selectedItem: selectedSettingsNavItem ?? 'general',
+    } only %}
+{% endblock %}

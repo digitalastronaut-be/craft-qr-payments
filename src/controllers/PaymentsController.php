@@ -13,8 +13,6 @@ namespace digitalastronaut\craftqrpayments\controllers;
 
 use Craft;
 use craft\elements\User;
-use craft\helpers\DateTimeHelper;
-use craft\helpers\Localization;
 use craft\helpers\UrlHelper;
 use craft\web\Controller;
 use craft\web\Response;
@@ -24,7 +22,6 @@ use digitalastronaut\craftqrpayments\elements\Payment;
 use digitalastronaut\craftqrpayments\QrPayments;
 use digitalastronaut\craftqrpayments\web\assets\frontend\FrontendAssetBundle;
 
-use DateTime;
 use Throwable;
 use yii\web\BadRequestHttpException;
 use yii\web\ForbiddenHttpException;
@@ -48,51 +45,6 @@ class PaymentsController extends Controller {
         $this->requirePermission('qr-payments:access-payments');
 
         return $this->renderTemplate('qr-payments/pages/_paymentHistory.twig');
-    }
-
-    /**
-     * @param float|null $amount
-     * @param string|null $email
-     * @return Response
-     */
-    public function actionCreate(?float $amount = null, ?string $email = null): Response {
-        $this->requirePermission('qr-payments:access-payments');
-
-        return $this->renderTemplate('qr-payments/pages/_createPayment.twig', [
-            'amount' => $amount,
-            'email' => $email,
-            'payment' => new Payment(),
-            'fieldLayout' => Payment::getCustomFieldLayout(),
-            'settings' => QrPayments::getInstance()->getSettings(),
-        ]);
-    }
-
-    /**
-     * @return Response|null
-     */
-    public function actionSave(): ?Response {
-        $this->requirePermission('qr-payments:access-payments');
-        $this->requirePostRequest();
-
-        $amount = $this->amountFromRequest();
-        $email = $this->request->getRequiredBodyParam('email');
-        $dueDate = $this->dueDateFromRequest();
-
-        try {
-            $payment = QrPayments::getInstance()->getPayments()->createPayment($amount, $email, $dueDate);
-        } catch (Throwable $error) {
-            Craft::error($error->getMessage(), __METHOD__);
-
-            $this->setFailFlash($error->getMessage());
-
-            Craft::$app->getUrlManager()->setRouteParams(['amount' => $amount, 'email' => $email]);
-
-            return null;
-        }
-
-        $this->setSuccessFlash(Craft::t('qr-payments', 'Payment created.'));
-
-        return $this->redirect($payment->getCpEditUrl());
     }
 
     /**
@@ -211,7 +163,9 @@ class PaymentsController extends Controller {
         if (!$email) return $this->asFailure(Craft::t('qr-payments', 'Email is required.'));
 
         try {
-            $payment = QrPayments::getInstance()->getPayments()->createPayment($amount, $email);
+            $type = QrPayments::getInstance()->getPaymentTypes()->getDefaultPaymentType();
+            $userId = Craft::$app->getUser()->getIdentity()?->id;
+            $payment = QrPayments::getInstance()->getPayments()->createPayment($type, $amount, $email, userId: $userId);
         } catch (Throwable $error) {
             Craft::error($error->getMessage(), __METHOD__);
 
@@ -274,40 +228,16 @@ class PaymentsController extends Controller {
         Craft::$app->view->registerAssetBundle(FrontendAssetBundle::class);
         QrPayments::getInstance()->getVite()->register('src/web/assets/frontend/frontend.js');
 
-        $settings = QrPayments::getInstance()->getSettings();
-
         $variables = [
             'payment' => $payment,
             'qrCodeDataUri' => $payment->getQrCodeDataUri(),
         ];
 
-        $override = $settings->payTemplate;
+        $override = $payment->getType()->payTemplate;
 
         if ($override !== '') return [$override, $variables, View::TEMPLATE_MODE_SITE];
 
         return ['qr-payments/components/_pay.twig', $variables, View::TEMPLATE_MODE_CP];
-    }
-
-    /**
-     * @return float
-     */
-    private function amountFromRequest(): float {
-        $posted = $this->request->getRequiredBodyParam('amount');
-
-        if (!\is_array($posted)) return (float) $posted;
-
-        return (float) Localization::normalizeNumber($posted['value'] ?? '', $posted['locale'] ?? null);
-    }
-
-    /**
-     * @return DateTime|null
-     */
-    private function dueDateFromRequest(): ?DateTime {
-        $posted = $this->request->getBodyParam('dueDate');
-
-        if (!$posted) return null;
-
-        return DateTimeHelper::toDateTime($posted) ?: null;
     }
 
     /**

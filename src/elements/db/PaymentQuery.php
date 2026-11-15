@@ -37,8 +37,12 @@ use yii\db\Expression;
  * @method self beneficiaryName(string $value)
  * @method self iban(string $value)
  * @method self remittanceReference(string|array $value)
+ * @method self userId(int $value)
  */
 class PaymentQuery extends ElementQuery {
+    public ?int $typeId = null;
+    public ?int $subscriptionId = null;
+    public ?int $userId = null;
     public string|array|null $beneficiaryName = null;
     public string|array|null $iban = null;
     public string|array|null $remittanceReference = null;
@@ -48,6 +52,33 @@ class PaymentQuery extends ElementQuery {
 
     public ?string $dueDateFrom = null;
     public ?string $dueDateTo = null;
+
+    /**
+     * @param int $value
+     * @return PaymentQuery
+     */
+    public function typeId(int $value): static {
+        $this->typeId = $value;
+        return $this;
+    }
+
+    /**
+     * @param int $value
+     * @return PaymentQuery
+     */
+    public function subscriptionId(int $value): static {
+        $this->subscriptionId = $value;
+        return $this;
+    }
+
+    /**
+     * @param int $value
+     * @return PaymentQuery
+     */
+    public function userId(int $value): static {
+        $this->userId = $value;
+        return $this;
+    }
 
     /**
      * @param string $value
@@ -105,6 +136,9 @@ class PaymentQuery extends ElementQuery {
         $this->joinElementTable('qr_payments_payments');
 
         $this->query->addSelect([
+            'qr_payments_payments.typeId',
+            'qr_payments_payments.subscriptionId',
+            'qr_payments_payments.userId',
             'qr_payments_payments.email',
             'qr_payments_payments.beneficiaryName',
             'qr_payments_payments.iban',
@@ -119,6 +153,18 @@ class PaymentQuery extends ElementQuery {
             'qr_payments_payments.confirmedAt',
             'qr_payments_payments.confirmedByUserId',
         ]);
+
+        if ($this->typeId !== null) {
+            $this->subQuery->andWhere(['qr_payments_payments.typeId' => $this->typeId]);
+        }
+
+        if ($this->subscriptionId !== null) {
+            $this->subQuery->andWhere(['qr_payments_payments.subscriptionId' => $this->subscriptionId]);
+        }
+
+        if ($this->userId !== null) {
+            $this->subQuery->andWhere(['qr_payments_payments.userId' => $this->userId]);
+        }
 
         if ($this->beneficiaryName !== null) {
             $this->subQuery->andWhere(Db::parseParam('qr_payments_payments.beneficiaryName', $this->beneficiaryName));

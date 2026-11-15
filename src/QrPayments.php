@@ -16,6 +16,7 @@ use craft\base\Model;
 use craft\base\Plugin;
 use craft\helpers\UrlHelper;
 
+use digitalastronaut\craftqrpayments\controllers\SubscriptionsController;
 use digitalastronaut\craftqrpayments\models\Settings;
 use digitalastronaut\craftqrpayments\services\ServicesTrait;
 
@@ -35,7 +36,7 @@ class QrPayments extends Plugin {
     use ServicesTrait;
     use PluginTrait;
 
-    public string $schemaVersion = '1.0.1';
+    public string $schemaVersion = '1.7.2';
     public bool $hasCpSettings = true;
     public bool $hasCpSection = true;
     public bool $hasReadOnlyCpSettings = true;
@@ -61,19 +62,35 @@ class QrPayments extends Plugin {
         $nav['icon'] = "@digitalastronaut/craftqrpayments/web/icons/qr-code-alt.svg";
         $nav['url'] = 'qr-payments';
 
-        if (Craft::$app->getUser()->checkPermission('qr-payments:access-payments')) {
+        $canAccessPayments = Craft::$app->getUser()->checkPermission('qr-payments:access-payments');
+
+        if ($canAccessPayments) {
             $nav['subnav']['payments'] = [
                 'label' => Craft::t('qr-payments', 'Payment history'),
                 'url' => 'qr-payments/payments',
             ];
+        }
 
+        if (Craft::$app->getUser()->checkPermission(SubscriptionsController::PERMISSION_MANAGE_SUBSCRIPTIONS)) {
+            $nav['subnav']['subscriptions'] = [
+                'label' => Craft::t('qr-payments', 'Subscriptions'),
+                'url' => 'qr-payments/subscriptions',
+            ];
+        }
+
+        if ($canAccessPayments) {
             $nav['subnav']['process'] = [
-                'label' => Craft::t('qr-payments', 'Process payments'),
+                'label' => Craft::t('qr-payments', 'Bulk processing'),
                 'url' => 'qr-payments/payments/process',
             ];
         }
 
         if (Craft::$app->getUser()->getIsAdmin()) {
+            // Payment types and Subscription types live inside the
+            // Settings area's own secondary sidebar nav (see
+            // `_settingsLayout.twig`) rather than here — they're
+            // schema/pricing-level config, same category as Settings
+            // itself, not a day-to-day nav destination.
             $nav['subnav']['settings'] = [
                 'label' => Craft::t('qr-payments', 'Settings'),
                 'url' => 'qr-payments/settings',

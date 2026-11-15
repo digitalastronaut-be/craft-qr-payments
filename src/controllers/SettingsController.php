@@ -13,12 +13,9 @@ namespace digitalastronaut\craftqrpayments\controllers;
 
 use Craft;
 use craft\base\PluginInterface;
-use craft\elements\User;
-use craft\models\FieldLayout;
 use craft\web\Controller;
 use craft\web\Response;
 
-use digitalastronaut\craftqrpayments\elements\Payment;
 use digitalastronaut\craftqrpayments\QrPayments;
 
 /**
@@ -34,29 +31,20 @@ class SettingsController extends Controller {
 
     /**
      * @param PluginInterface|null $plugin
-     * @param FieldLayout|null $fieldLayout re-populated on a failed save, via actionSave()'s route params
      * @return Response
      */
-    public function actionIndex(?PluginInterface $plugin = null, ?FieldLayout $fieldLayout = null): Response {
+    public function actionIndex(?PluginInterface $plugin = null): Response {
         $this->requireAdmin(false);
 
         $plugin ??= QrPayments::getInstance();
-        $settings = $plugin->getSettings();
 
         return $this->renderTemplate('qr-payments/pages/_settings.twig', [
             'plugin' => $plugin,
-            'settings' => $settings,
-            'fieldLayout' => $fieldLayout ?? Payment::getCustomFieldLayout(),
-            'reminderRecipientUsers' => $settings->reminderRecipients ? User::find()->id($settings->reminderRecipients)->status(null)->all() : [],
+            'settings' => $plugin->getSettings(),
         ]);
     }
 
     /**
-     * Saves the plugin's simple settings (beneficiary/IBAN/BIC) and the
-     * field layout designer's custom Payment fields in one submission,
-     * replacing the core `plugins/save-plugin-settings` action so the
-     * posted field layout config can also be assembled and persisted.
-     *
      * @return Response|null
      */
     public function actionSave(): ?Response {
@@ -65,19 +53,10 @@ class SettingsController extends Controller {
 
         $plugin = QrPayments::getInstance();
 
-        $fieldLayout = Craft::$app->getFields()->assembleLayoutFromPost();
-        $fieldLayout->type = Payment::class;
-
-        $settingsSaved = Craft::$app->getPlugins()->savePluginSettings($plugin, $this->request->getBodyParam('settings', []));
-        $fieldLayoutSaved = Craft::$app->getFields()->saveLayout($fieldLayout);
-
-        if (!$settingsSaved || !$fieldLayoutSaved) {
+        if (!Craft::$app->getPlugins()->savePluginSettings($plugin, $this->request->getBodyParam('settings', []))) {
             $this->setFailFlash(Craft::t('qr-payments', 'Couldn’t save settings.'));
 
-            Craft::$app->getUrlManager()->setRouteParams([
-                'plugin' => $plugin,
-                'fieldLayout' => $fieldLayout,
-            ]);
+            Craft::$app->getUrlManager()->setRouteParams(['plugin' => $plugin]);
 
             return null;
         }

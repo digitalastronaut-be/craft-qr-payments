@@ -1,0 +1,86 @@
+{# @var subscriptionType \digitalastronaut\craftqrpayments\models\SubscriptionType #}
+{# @var isNew bool #}
+{# @var paymentTypes \digitalastronaut\craftqrpayments\models\PaymentType[] #}
+
+{% extends "qr-payments/pages/_settingsLayout.twig" %}
+
+{% import '_includes/forms.twig' as forms %}
+
+{% set fullPageForm = true %}
+{% set title = isNew ? "Create a new subscription type"|t('qr-payments') : subscriptionType.name %}
+{% set selectedSettingsNavItem = 'subscriptionTypes' %}
+
+{% block content %}
+    {{ actionInput('qr-payments/subscription-types/save') }}
+    {{ redirectInput('qr-payments/subscription-types') }}
+
+    {% if subscriptionType.id %}
+        <input type="hidden" name="subscriptionTypeId" value="{{ subscriptionType.id }}">
+    {% endif %}
+
+    <div class="flex-fields">
+        {{ forms.textField({
+            label: 'Name'|t('qr-payments'),
+            id: 'name',
+            name: 'name',
+            value: subscriptionType.name,
+            errors: subscriptionType.getErrors('name'),
+            required: true,
+        }) }}
+
+        {{ forms.textField({
+            label: 'Handle'|t('qr-payments'),
+            instructions: 'How this plan is referred to from code.'|t('qr-payments'),
+            id: 'handle',
+            name: 'handle',
+            value: subscriptionType.handle,
+            errors: subscriptionType.getErrors('handle'),
+            required: true,
+            class: 'code',
+        }) }}
+
+        {% set paymentTypeOptions = [] %}
+        {% for type in paymentTypes %}
+            {% set paymentTypeOptions = paymentTypeOptions|merge([{ label: type.name, value: type.id }]) %}
+        {% endfor %}
+
+        {{ forms.selectizeField({
+            label: 'Payment type'|t('qr-payments'),
+            instructions: 'Which payment type’s beneficiary/IBAN, custom fields, and email templates this plan’s generated payments use.'|t('qr-payments'),
+            id: 'paymentTypeId',
+            name: 'paymentTypeId',
+            options: paymentTypeOptions,
+            value: subscriptionType.paymentTypeId,
+            errors: subscriptionType.getErrors('paymentTypeId'),
+            required: true,
+        }) }}
+
+        {% set intervalOptions = [] %}
+        {% for value, label in subscriptionType.intervals() %}
+            {% set intervalOptions = intervalOptions|merge([{ label: label, value: value }]) %}
+        {% endfor %}
+
+        {{ forms.selectizeField({
+            label: 'Interval'|t('qr-payments'),
+            instructions: 'The default billing cadence. Overridable per subscriber.'|t('qr-payments'),
+            id: 'interval',
+            name: 'interval',
+            options: intervalOptions,
+            value: subscriptionType.interval,
+            errors: subscriptionType.getErrors('interval'),
+            required: true,
+        }) }}
+
+        {{ forms.moneyField({
+            label: 'Amount'|t('qr-payments'),
+            instructions: 'The default amount charged each cycle. Overridable per subscriber.'|t('qr-payments'),
+            id: 'amount',
+            name: 'amount',
+            currency: 'EUR',
+            currencyLabel: '(EUR) €',
+            value: subscriptionType.getAmount() ? subscriptionType.getAmount().getAmount() / 100 : null,
+            errors: subscriptionType.getErrors('amount'),
+            required: true,
+        }) }}
+    </div>
+{% endblock %}

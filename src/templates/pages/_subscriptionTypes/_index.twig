@@ -1,0 +1,62 @@
+{# @var subscriptionTypes \digitalastronaut\craftqrpayments\models\SubscriptionType[] #}
+
+{% extends "qr-payments/pages/_settingsLayout.twig" %}
+
+{% do view.registerAssetBundle('craft\\web\\assets\\admintable\\AdminTableAsset') %}
+
+{% set title = "Subscription types"|t('qr-payments') %}
+{% set selectedSettingsNavItem = 'subscriptionTypes' %}
+
+{% block actionButton %}
+    <a class="btn submit add icon" href="{{ url('qr-payments/subscription-types/new') }}">
+        {{ "New subscription type"|t('qr-payments') }}
+    </a>
+{% endblock %}
+
+{% block content %}
+    <div id="qrp-subscriptiontypes-vue-admin-table"></div>
+{% endblock %}
+
+{% set tableData = [] %}
+{% for subscriptionType in subscriptionTypes %}
+    {% set paymentType = subscriptionType.getPaymentType() %}
+
+    {% set paymentTypeChip %}
+        {% if paymentType %}
+            <div class="chip small">
+                <div class="chip-content">
+                    <div><a href="{{ url('qr-payments/payment-types/' ~ paymentType.id) }}">{{ paymentType.name }}</a></div>
+                </div>
+            </div>
+        {% else %}
+            &mdash;
+        {% endif %}
+    {% endset %}
+
+    {% set tableData = tableData|merge([{
+        id: subscriptionType.id,
+        title: subscriptionType.name,
+        url: url('qr-payments/subscription-types/' ~ subscriptionType.id),
+        handle: subscriptionType.handle,
+        amount: (subscriptionType.getAmount().getAmount() / 100)|currency('EUR'),
+        interval: subscriptionType.intervals()[subscriptionType.interval] ?? subscriptionType.interval,
+        paymentType: paymentTypeChip|trim,
+    }]) %}
+{% endfor %}
+
+{% js %}
+    new Craft.VueAdminTable({
+        columns: [
+            { name: '__slot:title', title: Craft.t('qr-payments', 'Name'), sortField: true },
+            { name: '__slot:handle', title: Craft.t('qr-payments', 'Handle'), sortField: true },
+            { name: 'amount', title: Craft.t('qr-payments', 'Amount') },
+            { name: 'interval', title: Craft.t('qr-payments', 'Interval') },
+            { name: 'paymentType', title: Craft.t('qr-payments', 'Payment type'), callback: (value) => value },
+        ],
+        container: '#qrp-subscriptiontypes-vue-admin-table',
+        emptyMessage: Craft.t('qr-payments', 'No subscription types exist yet.'),
+        tableData: {{ tableData|json_encode|raw }},
+        deleteAction: 'qr-payments/subscription-types/delete',
+        deleteConfirmationMessage: Craft.t('qr-payments', 'Are you sure you want to delete this subscription type?'),
+    });
+{% endjs %}

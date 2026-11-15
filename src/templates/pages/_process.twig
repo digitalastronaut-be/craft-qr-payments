@@ -2,13 +2,13 @@
 
 {% import '_includes/forms.twig' as forms %}
 
-{% set title = "Process payments"|t('qr-payments') %}
+{% set title = "Bulk processing"|t('qr-payments') %}
 {% set selectedSubnavItem = 'process' %}
 
 {% set crumbs = [
     { label: 'QR payments'|t('qr-payments'), url: url('qr-payments') },
     { label: 'Payment history'|t('qr-payments'), url: url('qr-payments/payments') },
-    { label: 'Process payments'|t('qr-payments'), url: url('qr-payments/payments/process') },
+    { label: 'Bulk processing'|t('qr-payments'), url: url('qr-payments/payments/process') },
 ] %}
 
 {% block content %}

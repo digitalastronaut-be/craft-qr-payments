@@ -112,13 +112,14 @@ class StatusHistoryField extends FieldLayoutElement {
     }
 
     /**
+     * `copyAttributeAction()` lives on `craft\fieldlayoutelements\BaseField`,
+     * not the plain `craft\base\FieldLayoutElement` this class extends — it
+     * doesn't apply here anyway, since there's no single attribute backing
+     * this multi-row table to copy.
+     *
      * @inheritdoc
      */
     protected function actionMenuItems(?ElementInterface $element = null, bool $static = false): array {
-        $items = [];
-
-        if (Craft::$app->getUser()->getIsAdmin()) $items[] = $this->copyAttributeAction();
-
-        return $items;
+        return [];
     }
 }

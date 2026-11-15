@@ -13,15 +13,34 @@ namespace digitalastronaut\craftqrpayments\console\controllers;
 
 use Craft;
 use craft\elements\User;
+use craft\helpers\DateTimeHelper;
 
+use digitalastronaut\craftqrpayments\elements\Payment;
 use digitalastronaut\craftqrpayments\jobs\SendPaymentReminderEmailJob;
+use digitalastronaut\craftqrpayments\jobs\SendPaymentsSummaryEmailJob;
+use digitalastronaut\craftqrpayments\models\PaymentType;
 use digitalastronaut\craftqrpayments\QrPayments;
 
+use DateTime;
 use yii\console\Controller;
 use yii\console\ExitCode;
 
 /**
  * Class ReminderController
+ *
+ * One cron entry (`qr-payments/reminder/send`, run once daily — the
+ * payer-facing reminder below only fires on an exact day match, so a less
+ * frequent cron would miss payments) covers two distinct things:
+ *
+ * - The admin-facing summary digest: every `PaymentType` with its own
+ *   recipients and at least one payment needing action gets its own
+ *   queued `SendPaymentsSummaryEmailJob`.
+ * - The payer-facing reminder: every payment, regardless of type, that's
+ *   either exactly 7 days from its due date or exactly one day past it
+ *   (the first day it's expired) gets its own queued
+ *   `SendPaymentReminderEmailJob`, sent to the payer themself.
+ *
+ * Devs only ever need the one cron line either way.
  *
  * @author      Digitalastronaut
  * @package     QrPayments
@@ -34,27 +53,111 @@ class ReminderController extends Controller {
      * @return int
      */
     public function actionSend(): int {
-        $settings = QrPayments::getInstance()->getSettings();
-        $recipientEmails = [];
+        $summariesQueued = $this->queuePaymentsSummaries();
+        $remindersQueued = $this->queuePaymentReminders();
 
-        $recipients = $settings->reminderRecipients
-            ? User::find()->id($settings->reminderRecipients)
-                ->status(null)->all() : [];
+        if ($summariesQueued === 0 && $remindersQueued === 0) {
+            $this->stdout("Nothing to send\n");
 
-        foreach ($recipients as $recipient) {
-            if ($recipient->email) $recipientEmails[] = $recipient->email;
-        }
-
-        if (!$recipientEmails) {
-            $this->stdout("No recipients configured");
             return ExitCode::OK;
         }
 
-        Craft::$app->queue->push(new SendPaymentReminderEmailJob(['recipientEmails' => $recipientEmails]));
         Craft::$app->queue->run();
 
-        $this->stdout("Payment reminders queued");
+        $this->stdout("Sent summaries for {$summariesQueued} payment type(s) and {$remindersQueued} payment reminder(s)\n");
 
         return ExitCode::OK;
+    }
+
+    /**
+     * @return int Number of summary jobs queued.
+     */
+    private function queuePaymentsSummaries(): int {
+        $queued = 0;
+
+        foreach (QrPayments::getInstance()->getPaymentTypes()->getAllPaymentTypes() as $type) {
+            $recipientEmails = $this->recipientEmailsFor($type);
+
+            if (!$recipientEmails) continue;
+
+            $hasPaymentsNeedingAction = Payment::find()
+                ->typeId($type->id)
+                ->status([Payment::STATUS_PENDING, Payment::STATUS_AWAITING_CONFIRMATION, Payment::STATUS_EXPIRED, Payment::STATUS_PARTIAL])
+                ->exists();
+
+            if (!$hasPaymentsNeedingAction) continue;
+
+            Craft::$app->queue->push(new SendPaymentsSummaryEmailJob([
+                'paymentTypeId' => $type->id,
+                'recipientEmails' => $recipientEmails,
+            ]));
+
+            $this->stdout("Queued summary for \"{$type->name}\"\n");
+
+            $queued++;
+        }
+
+        return $queued;
+    }
+
+    /**
+     * Queues the payer-facing reminder for every payment that's either
+     * exactly 7 days from its due date, or exactly one day past it (the
+     * first day it's expired) — an exact day match, not a range, so each
+     * payment is only ever matched on one single day's run.
+     *
+     * @return int Number of reminder jobs queued.
+     */
+    private function queuePaymentReminders(): int {
+        $now = DateTimeHelper::currentUTCDateTime();
+
+        $dueSoon = Payment::find()
+            ->status(Payment::STATUS_PENDING)
+            ->dueDateBetween(...$this->dayBounds((clone $now)->modify('+7 days')))
+            ->all();
+
+        $justExpired = Payment::find()
+            ->status(Payment::STATUS_EXPIRED)
+            ->dueDateBetween(...$this->dayBounds((clone $now)->modify('-1 day')))
+            ->all();
+
+        $queued = 0;
+
+        foreach ([...$dueSoon, ...$justExpired] as $payment) {
+            if (!$payment->email) continue;
+
+            Craft::$app->queue->push(new SendPaymentReminderEmailJob(['paymentId' => $payment->id]));
+
+            $queued++;
+        }
+
+        return $queued;
+    }
+
+    /**
+     * @param DateTime $day
+     * @return string[] [start-of-day, end-of-day], formatted for `PaymentQuery::dueDateBetween()`.
+     */
+    private function dayBounds(DateTime $day): array {
+        $start = (clone $day)->setTime(0, 0, 0);
+        $end = (clone $day)->setTime(23, 59, 59);
+
+        return [$start->format('Y-m-d H:i:s'), $end->format('Y-m-d H:i:s')];
+    }
+
+    /**
+     * @param PaymentType $type
+     * @return string[]
+     */
+    private function recipientEmailsFor(PaymentType $type): array {
+        if (!$type->reminderRecipients) return [];
+
+        $recipientEmails = [];
+
+        foreach (User::find()->id($type->reminderRecipients)->status(null)->all() as $recipient) {
+            if ($recipient->email) $recipientEmails[] = $recipient->email;
+        }
+
+        return $recipientEmails;
     }
 }

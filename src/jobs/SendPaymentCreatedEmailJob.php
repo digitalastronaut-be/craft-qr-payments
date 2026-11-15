@@ -15,7 +15,6 @@ use Craft;
 use craft\web\View;
 
 use digitalastronaut\craftqrpayments\elements\Payment;
-use digitalastronaut\craftqrpayments\QrPayments;
 
 use RuntimeException;
 
@@ -32,10 +31,27 @@ class SendPaymentCreatedEmailJob extends SendTemplatedEmailJob {
     private ?Payment $payment = null;
 
     /**
+     * `Queue::push()` calls `getDescription()` (base class's
+     * `defaultDescription()`, via `getTemplate()`) before the job is
+     * serialized, which lazily populates `$payment` purely to build that
+     * description string. Left unguarded, that cached `Payment` — and its
+     * own cached, closure-bearing custom field layout (e.g. a Matrix or
+     * CKEditor field's `NestedElementManager`) — would ride along into
+     * `serialize()`, which doesn't allow closures. Excluding it here keeps
+     * the "entities are re-fetched on execute()" contract from the class
+     * docblock true in practice.
+     *
+     * @return string[]
+     */
+    public function __sleep(): array {
+        return ['paymentId'];
+    }
+
+    /**
      * @return string
      */
     protected function getTemplate(): string {
-        $override = QrPayments::getInstance()->getSettings()->paymentCreatedTemplate;
+        $override = $this->getPayment()->getType()->paymentCreatedTemplate;
 
         return $override !== '' ? $override : 'qr-payments/emails/_paymentCreated';
     }
@@ -44,7 +60,7 @@ class SendPaymentCreatedEmailJob extends SendTemplatedEmailJob {
      * @return string
      */
     protected function getTemplateMode(): string {
-        $override = QrPayments::getInstance()->getSettings()->paymentCreatedTemplate;
+        $override = $this->getPayment()->getType()->paymentCreatedTemplate;
 
         return $override !== '' ? View::TEMPLATE_MODE_SITE : View::TEMPLATE_MODE_CP;
     }
@@ -76,7 +92,7 @@ class SendPaymentCreatedEmailJob extends SendTemplatedEmailJob {
      * @return string|null
      */
     protected function getRecipient(): ?string {
-        return $this->getPayment()->email ?: null;
+        return $this->getPayment()->getNotificationEmail() ?: null;
     }
 
     /**
