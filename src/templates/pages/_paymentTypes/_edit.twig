@@ -9,13 +9,26 @@
 {% set title = isNew ? "Create a new payment type"|t('qr-payments') : paymentType.name %}
 {% set selectedSettingsNavItem = 'paymentTypes' %}
 
+{# Which tab each attribute's error belongs under, so a validation error on
+   a field tucked away on a hidden tab doesn't just disappear into the
+   generic "Couldn't save" flash with no clue where to look. #}
+{% set generalTabAttributes = ['name', 'handle', 'defaultDueDateDays', 'referencePrefix', 'payTemplate'] %}
+{% set beneficiaryTabAttributes = ['beneficiaryName', 'iban', 'bic'] %}
+{% set emailsTabAttributes = ['reminderRecipients', 'paymentCreatedTemplate', 'paymentStatusChangedTemplate', 'paymentsSummaryTemplate', 'paymentReminderTemplate'] %}
+
+{% set generalTabHasErrors = generalTabAttributes|filter(attribute => paymentType.hasErrors(attribute))|length > 0 %}
+{% set beneficiaryTabHasErrors = beneficiaryTabAttributes|filter(attribute => paymentType.hasErrors(attribute))|length > 0 %}
+{% set emailsTabHasErrors = emailsTabAttributes|filter(attribute => paymentType.hasErrors(attribute))|length > 0 %}
+
 {% set tabs = {
-    general: { label: 'General'|t('qr-payments'), url: '#general' },
-    beneficiary: { label: 'Beneficiary'|t('qr-payments'), url: '#beneficiary' },
-    emails: { label: 'Emails'|t('qr-payments'), url: '#emails' },
+    general: { label: 'General'|t('qr-payments'), url: '#general', class: generalTabHasErrors ? 'error' : '' },
+    beneficiary: { label: 'Beneficiary'|t('qr-payments'), url: '#beneficiary', class: beneficiaryTabHasErrors ? 'error' : '' },
+    emails: { label: 'Emails'|t('qr-payments'), url: '#emails', class: emailsTabHasErrors ? 'error' : '' },
 } %}
 
-{% set selectedTab = selectedTab|default('general') %}
+{# Default to whichever tab actually has the error, instead of always
+   landing back on General, so the field with the problem is visible. #}
+{% set selectedTab = selectedTab ?? (beneficiaryTabHasErrors ? 'beneficiary' : (emailsTabHasErrors ? 'emails' : 'general')) %}
 
 {% block content %}
     {{ actionInput('qr-payments/payment-types/save') }}
