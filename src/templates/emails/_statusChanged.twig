@@ -7,18 +7,35 @@
 {# @var previousStatusLabel string #}
 {# @var statusLabel string #}
 
+{% set detailRows = [
+    { label: 'Amount'|t('qr-payments'), value: payment.amount|money },
+    { label: 'Reference'|t('qr-payments'), value: payment.remittanceReference },
+]|filter(row => row.value) %}
+
 {# ======================= #}
 {# TEMPLATE                #}
 {# ======================= #}
 {% block content %}
-    <h2 style="{{ heading2Style }}">Hello,</h2>
+    <h1 style="{{ headingStyle }}">{{ 'Payment update'|t('qr-payments') }}</h1>
 
-    <p style="{{ textStyle }}" style="margin: 0 0 24px 0; line-height: 1.5;">
-        {{ "The status of your payment"|t }} ({{ payment.remittanceReference }}) {{ "has changed from"|t }} "{{ previousStatusLabel }}" {{ "to"|t }} "{{ statusLabel }}".
+    <p style="{{ textStyle }}">
+        {{ 'The status of your payment {reference} has changed from “{previous}” to “{current}”.'|t('qr-payments', {
+            reference: payment.remittanceReference,
+            previous: previousStatusLabel,
+            current: statusLabel,
+        }) }}
     </p>
 
-    <ul>
-        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Amount:"|t }}</span>{{ payment.amount|money }}</li>
-        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Reference:"|t }}</span>{{ payment.remittanceReference }}</li>
-    </ul>
+    <table style="{{ panelStyle }}" cellpadding="0" cellspacing="0" role="presentation">
+        {% for row in detailRows %}
+            <tr>
+                <td style="{{ panelLabelCellStyle }}{{ not loop.first ? panelRowBorderStyle : '' }}">{{ row.label }}</td>
+                <td style="{{ panelValueCellStyle }}{{ not loop.first ? panelRowBorderStyle : '' }}">{{ row.value }}</td>
+            </tr>
+        {% endfor %}
+    </table>
+
+    <p style="margin: 24px 0 0 0; text-align: center;">
+        <a href="{{ payment.getUrl() }}" style="{{ buttonStyle }}">{{ 'View payment'|t('qr-payments') }}</a>
+    </p>
 {% endblock %}

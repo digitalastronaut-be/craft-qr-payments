@@ -26,7 +26,7 @@ use yii\db\Expression;
  * Note: `$status` is intentionally left inherited from ElementQuery rather
  * than redeclared. The base default (`[Element::STATUS_ENABLED]`) keeps
  * Craft's native enabled/disabled toggle working as an independent axis
- * from Payment's own pending/paid/expired/cancelled status — callers that
+ * from Payment's own requested/paid/expired/cancelled status — callers that
  * want to filter by the latter do so explicitly via ->status('paid') etc.,
  * which routes through statusCondition() below.
  *
@@ -201,7 +201,7 @@ class PaymentQuery extends ElementQuery {
 
     /**
      * Mirrors Payment::getStatus(): `expired` isn't a stored value, it's a
-     * `pending` payment whose `dueDate` has passed, so the query-side
+     * `requested` payment whose `dueDate` has passed, so the query-side
      * condition has to reconstruct that same date comparison rather than
      * just matching the `status` column.
      *
@@ -212,14 +212,14 @@ class PaymentQuery extends ElementQuery {
         $now = Db::prepareDateForDb(DateTimeHelper::currentUTCDateTime());
 
         return match ($status) {
-            Payment::STATUS_PENDING => [
+            Payment::STATUS_REQUESTED => [
                 'and',
-                ['qr_payments_payments.status' => Payment::STATUS_PENDING],
+                ['qr_payments_payments.status' => Payment::STATUS_REQUESTED],
                 ['or', ['qr_payments_payments.dueDate' => null], ['>=', 'qr_payments_payments.dueDate', $now]],
             ],
             Payment::STATUS_EXPIRED => [
                 'and',
-                ['qr_payments_payments.status' => Payment::STATUS_PENDING],
+                ['qr_payments_payments.status' => Payment::STATUS_REQUESTED],
                 ['not', ['qr_payments_payments.dueDate' => null]],
                 ['<', 'qr_payments_payments.dueDate', $now],
             ],
@@ -309,7 +309,7 @@ class PaymentQuery extends ElementQuery {
 
     /**
      * SQL `CASE` expression reconstructing Payment::getStatus()'s
-     * `pending`-past-`dueDate`-becomes-`expired` rule, so status can be
+     * `requested`-past-`dueDate`-becomes-`expired` rule, so status can be
      * grouped by its effective value rather than the raw stored column.
      *
      * @return Expression
@@ -319,14 +319,14 @@ class PaymentQuery extends ElementQuery {
 
         return new Expression(
             'CASE ' .
-            'WHEN [[qr_payments_payments.status]] = :pendingStatus AND ([[qr_payments_payments.dueDate]] IS NULL OR [[qr_payments_payments.dueDate]] >= :now1) THEN :pendingLabel ' .
-            'WHEN [[qr_payments_payments.status]] = :pendingStatus AND [[qr_payments_payments.dueDate]] IS NOT NULL AND [[qr_payments_payments.dueDate]] < :now2 THEN :expiredLabel ' .
+            'WHEN [[qr_payments_payments.status]] = :requestedStatus AND ([[qr_payments_payments.dueDate]] IS NULL OR [[qr_payments_payments.dueDate]] >= :now1) THEN :requestedLabel ' .
+            'WHEN [[qr_payments_payments.status]] = :requestedStatus AND [[qr_payments_payments.dueDate]] IS NOT NULL AND [[qr_payments_payments.dueDate]] < :now2 THEN :expiredLabel ' .
             'ELSE [[qr_payments_payments.status]] END',
             [
-                ':pendingStatus' => Payment::STATUS_PENDING,
+                ':requestedStatus' => Payment::STATUS_REQUESTED,
                 ':now1' => $now,
                 ':now2' => $now,
-                ':pendingLabel' => Payment::STATUS_PENDING,
+                ':requestedLabel' => Payment::STATUS_REQUESTED,
                 ':expiredLabel' => Payment::STATUS_EXPIRED,
             ],
         );

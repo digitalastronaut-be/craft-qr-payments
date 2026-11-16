@@ -42,6 +42,8 @@ use digitalastronaut\craftqrpayments\elements\conditions\PaymentCondition;
 use digitalastronaut\craftqrpayments\elements\db\PaymentQuery;
 use digitalastronaut\craftqrpayments\fieldlayoutelements\PaymentFieldsField;
 use digitalastronaut\craftqrpayments\fieldlayoutelements\StatusHistoryField;
+use digitalastronaut\craftqrpayments\helpers\CpDateFormatter;
+use digitalastronaut\craftqrpayments\helpers\HumanDuration;
 use digitalastronaut\craftqrpayments\helpers\Table;
 use digitalastronaut\craftqrpayments\jobs\SendPaymentCreatedEmailJob;
 use digitalastronaut\craftqrpayments\jobs\SendPaymentStatusChangedEmailJob;
@@ -62,7 +64,7 @@ use Throwable;
  * @property Money|null $amount
  */
 class Payment extends Element {
-    public const string STATUS_PENDING = 'pending';
+    public const string STATUS_REQUESTED = 'requested';
     public const string STATUS_AWAITING_CONFIRMATION = 'reported';
     public const string STATUS_PARTIAL = 'partial';
     public const string STATUS_PAID = 'paid';
@@ -71,6 +73,7 @@ class Payment extends Element {
     public const string STATUS_CANCELLED = 'cancelled';
     public const string STATUS_REFUNDED = 'refunded';
 
+    public const string HISTORY_TYPE_CREATED = 'created';
     public const string HISTORY_TYPE_PAYMENT = 'payment';
     public const string HISTORY_TYPE_PAYER_REPORTED = 'payer_reported';
     public const string HISTORY_TYPE_REFUND = 'refund';
@@ -95,9 +98,12 @@ class Payment extends Element {
     public ?string $remittanceText = null;
     public ?string $qrCode = null;
 
-    public string $status = self::STATUS_PENDING;
+    public string $status = self::STATUS_REQUESTED;
 
     private array $_statusHistory = [];
+
+    /** The `id` `beforeSave()`'s `HISTORY_TYPE_CREATED` push returns, read back by `notifyCreated()` once the save succeeds. */
+    private ?string $pendingCreatedHistoryEntryId = null;
 
     public ?DateTime $dueDate = null;
     public ?DateTime $confirmedAt = null;
@@ -205,10 +211,11 @@ class Payment extends Element {
     }
 
     /**
-     * Normalizes the request-posted shape for `userId` (the element-select
-     * field's "nothing selected" placeholder quirk) before Craft's generic
-     * mass assignment (`setAttributes()`) handles the rest — same gotcha
-     * `Subscription::setAttributesFromRequest()` works around.
+     * Normalizes the request-posted shape for `userId`/`subscriptionId`
+     * (the element-select field's "nothing selected" placeholder quirk)
+     * before Craft's generic mass assignment (`setAttributes()`) handles
+     * the rest — same gotcha `Subscription::setAttributesFromRequest()`
+     * works around.
      *
      * @inheritdoc
      */
@@ -216,6 +223,11 @@ class Payment extends Element {
         if (\array_key_exists('userId', $values)) {
             $ids = \is_array($values['userId']) ? $values['userId'] : ($values['userId'] === '' ? [] : (array) $values['userId']);
             $values['userId'] = $ids ? (int) $ids[0] : null;
+        }
+
+        if (\array_key_exists('subscriptionId', $values)) {
+            $ids = \is_array($values['subscriptionId']) ? $values['subscriptionId'] : ($values['subscriptionId'] === '' ? [] : (array) $values['subscriptionId']);
+            $values['subscriptionId'] = $ids ? (int) $ids[0] : null;
         }
 
         parent::setAttributesFromRequest($values);
@@ -239,6 +251,18 @@ class Payment extends Element {
      */
     public function getNotificationEmail(): ?string {
         return $this->getOwner()?->email ?? $this->email;
+    }
+
+    /**
+     * The same "time until" notation as the element index's own "Expires
+     * in" column (see `attributeHtml()`, which calls this directly),
+     * reused by the payments-summary digest email so both show the
+     * due date the same way.
+     *
+     * @return string Empty string if `dueDate` is unset.
+     */
+    public function getDueInLabel(): string {
+        return HumanDuration::until($this->dueDate);
     }
 
     /**
@@ -273,10 +297,10 @@ class Payment extends Element {
      */
     public static function statuses(): array {
         return [
-            self::STATUS_PENDING => ['label' => Craft::t('qr-payments', 'Pending'), 'color' => Color::Orange],
+            self::STATUS_REQUESTED => ['label' => Craft::t('qr-payments', 'Requested'), 'color' => Color::Orange],
             self::STATUS_AWAITING_CONFIRMATION => ['label' => Craft::t('qr-payments', 'Marked paid'), 'color' => Color::Cyan],
             self::STATUS_PARTIAL => ['label' => Craft::t('qr-payments', 'Partially paid'), 'color' => Color::Blue],
-            self::STATUS_PAID => ['label' => Craft::t('qr-payments', 'Paid'), 'color' => Color::Teal],
+            self::STATUS_PAID => ['label' => Craft::t('qr-payments', 'Paid'), 'color' => Color::Green],
             self::STATUS_OVERPAID => ['label' => Craft::t('qr-payments', 'Overpaid'), 'color' => Color::Red],
             self::STATUS_EXPIRED => ['label' => Craft::t('qr-payments', 'Expired'), 'color' => Color::Red],
             self::STATUS_CANCELLED => ['label' => Craft::t('qr-payments', 'Cancelled'), 'color' => Color::Gray],
@@ -289,10 +313,11 @@ class Payment extends Element {
      */
     public static function historyTypes(): array {
         return [
-            self::HISTORY_TYPE_PAYMENT => ['label' => Craft::t('qr-payments', 'Payment'), 'color' => Color::Teal],
-            self::HISTORY_TYPE_PAYER_REPORTED => ['label' => Craft::t('qr-payments', 'Marked as paid by payer'), 'color' => Color::Cyan],
-            self::HISTORY_TYPE_REFUND => ['label' => Craft::t('qr-payments', 'Refund'), 'color' => Color::Purple],
-            self::HISTORY_TYPE_CANCELLATION => ['label' => Craft::t('qr-payments', 'Cancellation'), 'color' => Color::Gray],
+            self::HISTORY_TYPE_CREATED => ['label' => Craft::t('qr-payments', 'Requested'), 'color' => Color::Orange],
+            self::HISTORY_TYPE_PAYMENT => ['label' => Craft::t('qr-payments', 'Paid'), 'color' => Color::Green],
+            self::HISTORY_TYPE_PAYER_REPORTED => ['label' => Craft::t('qr-payments', 'Marked paid'), 'color' => Color::Cyan],
+            self::HISTORY_TYPE_REFUND => ['label' => Craft::t('qr-payments', 'Refunded'), 'color' => Color::Purple],
+            self::HISTORY_TYPE_CANCELLATION => ['label' => Craft::t('qr-payments', 'Cancelled'), 'color' => Color::Gray],
         ];
     }
 
@@ -336,9 +361,9 @@ class Payment extends Element {
         if ($this->getIsDraft() || $this->archived) return parent::getStatus();
 
         if (
-            $this->status === self::STATUS_PENDING && 
-            $this->dueDate !== null && 
-            $this->dueDate < DateTimeHelper::currentUTCDateTime()) 
+            $this->status === self::STATUS_REQUESTED &&
+            $this->dueDate !== null &&
+            $this->dueDate < DateTimeHelper::currentUTCDateTime())
         {
             return self::STATUS_EXPIRED;
         }
@@ -347,12 +372,26 @@ class Payment extends Element {
     }
 
     /**
+     * Hides Craft's native "Enabled" lightswitch from the sidebar — it's
+     * an independent axis from this plugin-owned `$status` (see
+     * `getStatus()`), and showing both next to each other reads as two
+     * conflicting status controls rather than two different things.
+     * `canonical` elements stay findable/queryable regardless either way,
+     * since nothing here ever sets `enabled` to `false`.
+     *
+     * @return bool
+     */
+    protected function showStatusField(): bool {
+        return false;
+    }
+
+    /**
      * @return bool Whether the payer can self-report this payment as paid —
      * only while a balance is still outstanding and nothing's been
      * confirmed or already self-reported.
      */
     public function canReportPaidByPayer(): bool {
-        return \in_array($this->getStatus(), [self::STATUS_PENDING, self::STATUS_PARTIAL], true);
+        return \in_array($this->getStatus(), [self::STATUS_REQUESTED, self::STATUS_PARTIAL], true);
     }
 
     /**
@@ -382,12 +421,18 @@ class Payment extends Element {
      * later import covering the same transaction again can recognize it
      * and skip it instead of double-applying. Left null for entries added
      * manually through the CP — those can never collide with a fingerprint.
-     * @return void
+     * @return string The new entry's `id`, so a caller that's about to send
+     * a notification email for this exact entry (see `notifyCreated()`/
+     * `notifyStatusChange()`) can tag that email's `EmailLogService` row
+     * with it, linking the two back together in the CP.
      */
-    public function pushStatusHistoryEntry(string $type, ?Money $amount, ?int $userId, ?string $note = null, ?string $source = null): void {
+    public function pushStatusHistoryEntry(string $type, ?Money $amount, ?int $userId, ?string $note = null, ?string $source = null): string {
         $history = $this->getStatusHistory();
 
+        $id = StringHelper::UUID();
+
         $history[] = [
+            'id' => $id,
             'type' => $type,
             'date' => DateTimeHelper::currentUTCDateTime()->format(DateTime::ATOM),
             'userId' => $userId,
@@ -397,6 +442,8 @@ class Payment extends Element {
         ];
 
         $this->setStatusHistory($history);
+
+        return $id;
     }
 
     /**
@@ -418,7 +465,16 @@ class Payment extends Element {
         // apply step) or set directly by the caller (`createPayment()`), so
         // this is the right — and only — moment to generate the QR code and
         // fire the "payment created" notification (in `afterSave()`).
-        if ($this->firstSave && !$this->generateQrCode()) return false;
+        if ($this->firstSave) {
+            if (!$this->generateQrCode()) return false;
+
+            // So the status history timeline shows how this payment came
+            // to be `requested` instead of starting blank — `computeStatus()`
+            // still falls back to `requested` on its own either way, this
+            // entry doesn't change that; it's a record of the event, not
+            // what decides the status.
+            $this->pendingCreatedHistoryEntryId = $this->pushStatusHistoryEntry(self::HISTORY_TYPE_CREATED, null, null);
+        }
 
         $this->status = $this->computeStatus();
         $this->syncConfirmation();
@@ -473,12 +529,18 @@ class Payment extends Element {
     }
 
     /**
+     * @param array[]|null $history Defaults to the full, current
+     * `getStatusHistory()` — pass a prefix of it (e.g. the first `$n`
+     * entries) to get the status that *resulted* from just those entries
+     * instead, the way `StatusHistoryField` does to label each row with
+     * the status it left the payment in rather than the generic kind of
+     * action it was.
      * @return string
      */
-    public function computeStatus(): string {
-        if ($this->hasHistoryEntryOfType(self::HISTORY_TYPE_CANCELLATION)) return self::STATUS_CANCELLED;
+    public function computeStatus(?array $history = null): string {
+        if ($this->hasHistoryEntryOfType(self::HISTORY_TYPE_CANCELLATION, $history)) return self::STATUS_CANCELLED;
 
-        $netPaid = $this->netPaidAmount();
+        $netPaid = $this->netPaidAmount($history);
         $totalPrice = $this->getAmount();
 
         if ($netPaid->isPositive()) {
@@ -491,45 +553,126 @@ class Payment extends Element {
             };
         }
 
-        if ($this->hasHistoryEntryOfType(self::HISTORY_TYPE_REFUND)) return self::STATUS_REFUNDED;
+        if ($this->hasHistoryEntryOfType(self::HISTORY_TYPE_REFUND, $history)) return self::STATUS_REFUNDED;
 
-        if ($this->hasHistoryEntryOfType(self::HISTORY_TYPE_PAYER_REPORTED)) return self::STATUS_AWAITING_CONFIRMATION;
+        if ($this->hasHistoryEntryOfType(self::HISTORY_TYPE_PAYER_REPORTED, $history)) return self::STATUS_AWAITING_CONFIRMATION;
 
-        return self::STATUS_PENDING;
+        return self::STATUS_REQUESTED;
     }
 
     /**
+     * @param array[]|null $history See `computeStatus()`'s own `$history` param.
      * @return Money
      */
-    public function netPaidAmount(): Money {
+    public function netPaidAmount(?array $history = null): Money {
+        return $this->getGrossPaidAmount($history)->subtract($this->getRefundedAmount($history));
+    }
+
+    /**
+     * @param array[]|null $history See `computeStatus()`'s own `$history` param.
+     * @return Money Everything ever recorded as paid, before any refunds
+     * are netted out — see `netPaidAmount()` for the figure that matters
+     * for status/reconciliation, and `getRefundedAmount()` for the other
+     * half of that subtraction.
+     */
+    public function getGrossPaidAmount(?array $history = null): Money {
+        return $this->sumHistoryAmountsOfType(self::HISTORY_TYPE_PAYMENT, $history);
+    }
+
+    /**
+     * @param array[]|null $history See `computeStatus()`'s own `$history` param.
+     * @return Money Everything ever recorded as refunded.
+     */
+    public function getRefundedAmount(?array $history = null): Money {
+        return $this->sumHistoryAmountsOfType(self::HISTORY_TYPE_REFUND, $history);
+    }
+
+    /**
+     * @param string $type One of the `HISTORY_TYPE_*` constants.
+     * @param array[]|null $history Defaults to the full, current `getStatusHistory()` — see `computeStatus()`'s own `$history` param.
+     * @return Money
+     */
+    private function sumHistoryAmountsOfType(string $type, ?array $history = null): Money {
         $currency = new Currency(self::CURRENCY);
-        $paid = new Money(0, $currency);
-        $refunded = new Money(0, $currency);
+        $sum = new Money(0, $currency);
         $parser = new DecimalMoneyParser(new ISOCurrencies());
 
-        foreach ($this->getStatusHistory() as $entry) {
+        foreach ($history ?? $this->getStatusHistory() as $entry) {
+            if (($entry['type'] ?? null) !== $type) continue;
+
             $amount = $entry['amount'] ?? null;
 
             if ($amount === null || $amount === '') continue;
 
-            $money = $parser->parse((string) $amount, $currency);
-
-            match ($entry['type'] ?? null) {
-                self::HISTORY_TYPE_PAYMENT => $paid = $paid->add($money),
-                self::HISTORY_TYPE_REFUND => $refunded = $refunded->add($money),
-                default => null,
-            };
+            $sum = $sum->add($parser->parse((string) $amount, $currency));
         }
 
-        return $paid->subtract($refunded);
+        return $sum;
+    }
+
+    /**
+     * @return Money The balance still owed — the total price minus
+     * whatever's been paid net of refunds. Floors at zero rather than
+     * going negative once nothing more is owed (e.g. once paid in full),
+     * and falls back to zero for a flexible-amount payment with no fixed
+     * total yet.
+     */
+    public function getRemainingAmount(): Money {
+        $currency = new Currency(self::CURRENCY);
+        $total = $this->getAmount() ?? new Money(0, $currency);
+        $remaining = $total->subtract($this->netPaidAmount());
+
+        return $remaining->isNegative() ? new Money(0, $currency) : $remaining;
+    }
+
+    /**
+     * @return Money How much more than the total price has been paid, net
+     * of refunds — the amount still owed back to the payer. Floors at
+     * zero once there's nothing left to refund (e.g. the overpayment has
+     * already been refunded, dropping this back to `paid`).
+     */
+    public function getOverpaidAmount(): Money {
+        $currency = new Currency(self::CURRENCY);
+        $total = $this->getAmount() ?? new Money(0, $currency);
+        $over = $this->netPaidAmount()->subtract($total);
+
+        return $over->isNegative() ? new Money(0, $currency) : $over;
+    }
+
+    /**
+     * @return string|null Same shape as `getQrCodeDataUri()`, but for a
+     * `partial` payment it's regenerated here for the outstanding balance
+     * rather than returning the `qrCode` column — that's a static blob
+     * written once at creation for the amount originally requested (see
+     * `generateQrCode()`), and never updates as partial payments come in,
+     * so scanning it would still prefill a banking app with the original
+     * total instead of what's actually left to pay.
+     */
+    public function getPayableQrCodeDataUri(): ?string {
+        if ($this->getStatus() !== self::STATUS_PARTIAL) return $this->getQrCodeDataUri();
+
+        try {
+            return QrPayments::getInstance()->getEpcQr()->generateQrCode(
+                beneficiaryName: $this->beneficiaryName,
+                iban: $this->iban,
+                amount: (float) MoneyHelper::toDecimal($this->getRemainingAmount()),
+                bic: $this->bic,
+                remittanceReference: $this->remittanceReference,
+            )->getDataUri();
+        } catch (Throwable $e) {
+            Craft::error($e->getMessage(), __METHOD__);
+
+            return $this->getQrCodeDataUri();
+        }
     }
 
     /**
      * @param string $type
+     * @param array[]|null $history Defaults to the full, current `getStatusHistory()` — see `computeStatus()`'s own `$history` param.
      * @return bool
      */
-    private function hasHistoryEntryOfType(string $type): bool {
-        foreach ($this->getStatusHistory() as $entry) {
+    private function hasHistoryEntryOfType(string $type, ?array $history = null): bool {
+        foreach ($history ?? $this->getStatusHistory() as $entry) {
             if (($entry['type'] ?? null) === $type) return true;
         }
 
@@ -578,7 +721,7 @@ class Payment extends Element {
     protected static function defineSources(string $context): array {
         $statusCounts = static::find()->statusCounts();
 
-        $needsActionStatuses = [self::STATUS_PENDING, self::STATUS_AWAITING_CONFIRMATION, self::STATUS_EXPIRED, self::STATUS_PARTIAL, self::STATUS_OVERPAID];
+        $needsActionStatuses = [self::STATUS_REQUESTED, self::STATUS_AWAITING_CONFIRMATION, self::STATUS_EXPIRED, self::STATUS_PARTIAL, self::STATUS_OVERPAID];
         $resolvedStatuses = [self::STATUS_PAID, self::STATUS_CANCELLED, self::STATUS_REFUNDED];
 
         $sources = [
@@ -692,12 +835,14 @@ class Payment extends Element {
     protected static function defineTableAttributes(): array {
         return [
             'status' => ['label' => Craft::t('qr-payments', 'Status')],
+            'owner' => ['label' => Craft::t('qr-payments', 'Owner')],
+            'type' => ['label' => Craft::t('qr-payments', 'Type')],
             'beneficiaryName' => ['label' => Craft::t('qr-payments', 'Beneficiary')],
             'iban' => ['label' => Craft::t('qr-payments', 'IBAN')],
             'amount' => ['label' => Craft::t('qr-payments', 'Total price')],
             'remittanceReference' => ['label' => Craft::t('qr-payments', 'Reference')],
             'remittanceText' => ['label' => Craft::t('qr-payments', 'Description')],
-            'dueDate' => ['label' => Craft::t('qr-payments', 'Due date')],
+            'dueDate' => ['label' => Craft::t('qr-payments', 'Expires in')],
             'confirmedAt' => ['label' => Craft::t('qr-payments', 'Confirmed at')],
             'historyActions' => ['label' => Craft::t('qr-payments', 'Actions')],
         ];
@@ -710,6 +855,8 @@ class Payment extends Element {
     protected static function defineDefaultTableAttributes(string $source): array {
         return [
             'status',
+            'owner',
+            'type',
             'amount',
             'dueDate',
             'historyActions',
@@ -721,8 +868,20 @@ class Payment extends Element {
      */
     protected function attributeHtml(string $attribute): string {
         return match ($attribute) {
+            'owner' => ($owner = $this->getOwner()) ? Cp::elementChipHtml($owner) : Html::encode($this->email),
+            'type' => Cp::chipHtml($this->getType(), ['hyperlink' => true]),
             'amount' => Html::encode(MoneyHelper::toString($this->getAmount()) ?: ''),
             'historyActions' => $this->historyActionButtonsHtml(small: true),
+            // `dueDate` shows the "Expires in" duration (`getDueInLabel()`)
+            // rather than the date itself — same reasoning
+            // `Subscription::validForLabel()` shows "Valid for" instead of
+            // its own "Next due date" directly. `confirmedAt` stays a
+            // plain date (when something was confirmed is a fact, not a
+            // countdown) — overridden rather than left to fall through to
+            // `parent::attributeHtml()`, which would otherwise format it
+            // in the install's locale-dependent `short` style.
+            'dueDate' => Html::encode($this->getDueInLabel()),
+            'confirmedAt' => Html::encode(CpDateFormatter::format($this->confirmedAt)),
             default => parent::attributeHtml($attribute),
         };
     }
@@ -736,7 +895,14 @@ class Payment extends Element {
             // `Subscription::defineRules()` — so the very first save of a
             // brand-new unpublished draft succeeds before the payer/operator
             // has entered either one yet.
-            [['email', 'amount'], 'required', 'on' => [self::SCENARIO_DEFAULT, self::SCENARIO_LIVE]],
+            [['amount'], 'required', 'on' => [self::SCENARIO_DEFAULT, self::SCENARIO_LIVE]],
+
+            // Only required for a guest payment — once there's a linked
+            // `userId`, that account's own address is what notifications
+            // actually go to (see `getNotificationEmail()`), so `email` is
+            // just a fallback snapshot at that point, not something that
+            // has to be filled in.
+            [['email'], 'required', 'when' => fn(self $model) => $model->userId === null, 'on' => [self::SCENARIO_DEFAULT, self::SCENARIO_LIVE]],
 
             // Always required, but never user-entered: `beforeValidate()`
             // derives all of these from the `PaymentType` (or, for
@@ -745,6 +911,7 @@ class Payment extends Element {
 
             [['typeId'], 'integer'],
             [['subscriptionId'], 'integer'],
+            [['subscriptionId'], 'validateSubscriptionExists'],
             [['userId'], 'integer'],
             [['userId'], 'validateOwnerExists'],
             [['email'], 'email'],
@@ -803,6 +970,20 @@ class Payment extends Element {
      * @param string $attribute
      * @return void
      */
+    public function validateSubscriptionExists(string $attribute): void {
+        $id = $this->$attribute;
+
+        if ($id === null) return;
+
+        if (!Subscription::find()->id($id)->status(null)->exists()) {
+            $this->addError($attribute, Craft::t('qr-payments', 'Could not find the selected subscription.'));
+        }
+    }
+
+    /**
+     * @param string $attribute
+     * @return void
+     */
     public function validateStatusHistory(string $attribute): void {
         $netPaid = $this->netPaidAmount();
 
@@ -836,6 +1017,18 @@ class Payment extends Element {
      */
     public function cpEditUrl(): string {
         return UrlHelper::cpUrl("qr-payments/payments/{$this->id}");
+    }
+
+    /**
+     * Without this, `ElementHelper::postEditUrl()` falls back to the CP's
+     * `postCpLoginRedirect` setting (`entries` by default) once a save
+     * posts no `redirect` param of its own — exactly the native "New
+     * payment" draft-publish flow, which never sets one.
+     *
+     * @inheritdoc
+     */
+    public function getPostEditUrl(): ?string {
+        return $this->cpEditUrl();
     }
 
     /**
@@ -919,9 +1112,13 @@ class Payment extends Element {
             'style' => 'display: block; width: 100%; max-width: 160px; padding-block: 24px;',
         ]), ['class' => 'meta']);
 
-        $dueDate = Html::tag('div', $this->dueDateFieldHtml($static), ['class' => 'meta']);
+        // One `.meta` box with the subscription/owner/contact/due-date
+        // fields stacked as rows inside it — same grouping Craft's own
+        // native sidebar boxes (e.g. the "Status" box) use, rather than
+        // four separate boxes.
+        $ownerGroup = Html::tag('div', $this->subscriptionFieldHtml($static) . $this->ownerFieldHtml($static) . $this->emailFieldHtml($static) . $this->dueDateFieldHtml($static), ['class' => 'meta']);
 
-        return $image . parent::getSidebarHtml($static) . $dueDate;
+        return $image . parent::getSidebarHtml($static) . $ownerGroup;
     }
 
     /**
@@ -935,8 +1132,14 @@ class Payment extends Element {
             return ['markAsPaid' => false, 'addPayment' => false, 'refund' => $hasPayment, 'cancel' => false];
         }
 
+        // Fully settled — nothing left to add, mark as paid, or cancel;
+        // the only thing that still makes sense is undoing it.
+        if ($status === self::STATUS_PAID) {
+            return ['markAsPaid' => false, 'addPayment' => false, 'refund' => true, 'cancel' => false];
+        }
+
         return [
-            'markAsPaid' => !$hasPayment && !\in_array($status, [self::STATUS_PAID, self::STATUS_REFUNDED], true),
+            'markAsPaid' => !$hasPayment && $status !== self::STATUS_REFUNDED,
             'addPayment' => true,
             'refund' => $hasPayment,
             'cancel' => true,
@@ -1090,6 +1293,81 @@ class Payment extends Element {
     }
 
     /**
+     * Stacked above the owner/contact pair in the sidebar's meta fieldset
+     * — was a read-only `Cp::elementChipHtml()` chip in `metadata()`
+     * before, but which subscription (if any) generated this payment is
+     * something an admin can legitimately need to correct (e.g. a payment
+     * created standalone that should actually have been linked to one),
+     * not just inspect.
+     *
+     * @param bool $static
+     * @return string
+     */
+    protected function subscriptionFieldHtml(bool $static): string {
+        $subscription = $this->getSubscription();
+
+        return Cp::elementSelectFieldHtml([
+            'label' => Craft::t('qr-payments', 'Subscription'),
+            'id' => 'subscriptionId',
+            'name' => 'subscriptionId',
+            'elementType' => Subscription::class,
+            'elements' => $subscription ? [$subscription] : [],
+            'sources' => '*',
+            'limit' => 1,
+            'disabled' => $static,
+            'errors' => $this->getErrors('subscriptionId'),
+        ]);
+    }
+
+    /**
+     * The linked-account half of the owner/contact pair — stacked above
+     * `emailFieldHtml()` in the sidebar's owner fieldset. Editable for the
+     * life of the payment: a guest payment can be linked to an account
+     * later (e.g. once the payer registers), same as `Subscription`'s own
+     * owner field.
+     *
+     * @param bool $static
+     * @return string
+     */
+    protected function ownerFieldHtml(bool $static): string {
+        $owner = $this->getOwner();
+
+        return Cp::elementSelectFieldHtml([
+            'label' => Craft::t('qr-payments', 'Owner'),
+            'id' => 'userId',
+            'name' => 'userId',
+            'elementType' => User::class,
+            'elements' => $owner ? [$owner] : [],
+            'sources' => '*',
+            'limit' => 1,
+            'disabled' => $static,
+            'errors' => $this->getErrors('userId'),
+        ]);
+    }
+
+    /**
+     * The guest-contact half of the owner/contact pair. Only actually
+     * required while there's no linked account (see `defineRules()`) —
+     * once one's linked, its own address is what notifications go to
+     * (`getNotificationEmail()`), so this just stays around as a fallback
+     * snapshot, editable here for corrections.
+     *
+     * @param bool $static
+     * @return string
+     */
+    protected function emailFieldHtml(bool $static): string {
+        return Cp::textFieldHtml([
+            'label' => Craft::t('qr-payments', 'Email'),
+            'id' => 'email',
+            'name' => 'email',
+            'type' => 'email',
+            'value' => $this->email,
+            'disabled' => $static,
+            'errors' => $this->getErrors('email'),
+        ]);
+    }
+
+    /**
      * @param bool $static
      * @return string
      */
@@ -1114,12 +1392,11 @@ class Payment extends Element {
             Craft::t('qr-payments', 'Total price') => fn() => MoneyHelper::toString($this->getAmount()) ?: false,
             Craft::t('qr-payments', 'Amount paid') => fn() => MoneyHelper::toString($this->netPaidAmount()),
             Craft::t('qr-payments', 'Reference') => fn() => $this->remittanceReference ?: false,
-            Craft::t('qr-payments', 'Email') => fn() => $this->email ?: false,
             Craft::t('qr-payments', 'Beneficiary') => fn() => $this->beneficiaryName ?: false,
             Craft::t('qr-payments', 'IBAN') => fn() => $this->iban ?: false,
             Craft::t('qr-payments', 'BIC') => fn() => $this->bic ?: false,
             Craft::t('qr-payments', 'Confirmed at') => fn() => $this->confirmedAt
-                ? Craft::$app->getFormatter()->asDatetime($this->confirmedAt)
+                ? CpDateFormatter::format($this->confirmedAt)
                 : false,
             Craft::t('qr-payments', 'Confirmed by') => fn() => $this->confirmedByUserId
                 ? (Craft::$app->getUsers()->getUserById($this->confirmedByUserId)?->getFriendlyName() ?: false)
@@ -1197,9 +1474,47 @@ class Payment extends Element {
             // in-memory instance, so it needs the just-generated `qrCode`
             // (and everything else) to already be persisted.
             if ($this->firstSave) $this->notifyCreated();
+
+            // Also after the upsert: re-evaluates every payment on this
+            // subscription, which needs this one's just-saved status
+            // already in the DB, not the in-memory value.
+            $this->maybeActivateSubscription();
         }
 
         parent::afterSave($isNew);
+    }
+
+    /**
+     * When this payment is linked to a subscription and effectively
+     * `paid`/`overpaid`, (re-)activates that subscription once every
+     * payment linked to it is also `paid`/`overpaid`. Runs on every save
+     * of a subscription-linked payment, not just a transition into paid
+     * status — there's no need to tell those apart, since setting an
+     * already-`active` subscription to `active` again (the ordinary
+     * renewal-paid case) is harmless.
+     *
+     * Deliberately skips a `cancelled` subscription: an admin-initiated
+     * cancellation shouldn't get silently reversed just because a late
+     * payment cleared.
+     *
+     * @return void
+     */
+    private function maybeActivateSubscription(): void {
+        if ($this->subscriptionId === null) return;
+        if (!\in_array($this->getStatus(), [self::STATUS_PAID, self::STATUS_OVERPAID], true)) return;
+
+        $subscription = $this->getSubscription();
+
+        if ($subscription === null) return;
+        if (!\in_array($subscription->status, [Subscription::STATUS_REQUESTED, Subscription::STATUS_ACTIVE], true)) return;
+
+        $siblingPayments = self::find()->subscriptionId($this->subscriptionId)->status(null)->all();
+
+        foreach ($siblingPayments as $siblingPayment) {
+            if (!\in_array($siblingPayment->getStatus(), [self::STATUS_PAID, self::STATUS_OVERPAID], true)) return;
+        }
+
+        QrPayments::getInstance()->getSubscriptions()->activate($subscription);
     }
 
     /**
@@ -1222,9 +1537,12 @@ class Payment extends Element {
 
         if ($previousStatus === $this->status || !$this->email) return;
 
+        $latestEntry = end($this->_statusHistory) ?: null;
+
         Craft::$app->getQueue()->push(new SendPaymentStatusChangedEmailJob([
             'paymentId' => $this->id,
             'previousStatus' => $previousStatus,
+            'historyEntryId' => $latestEntry['id'] ?? null,
         ]));
 
         App::maxPowerCaptain();
@@ -1235,7 +1553,10 @@ class Payment extends Element {
      * @return void
      */
     private function notifyCreated(): void {
-        Craft::$app->getQueue()->push(new SendPaymentCreatedEmailJob(['paymentId' => $this->id]));
+        Craft::$app->getQueue()->push(new SendPaymentCreatedEmailJob([
+            'paymentId' => $this->id,
+            'historyEntryId' => $this->pendingCreatedHistoryEntryId,
+        ]));
 
         App::maxPowerCaptain();
         Craft::$app->queue->run();

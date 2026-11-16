@@ -446,7 +446,7 @@ abstract class TransactionsExportParser {
      * - Cancelled or already settled (paid/refunded): only suggests a
      *   refund, and only if the row amount wouldn’t refund more than was
      *   actually paid.
-     * - Anything still open (pending/partial/overpaid/expired): suggests
+     * - Anything still open (requested/partial/overpaid/expired): suggests
      *   recording it as a payment — “Mark as paid” specifically when
      *   nothing’s been paid yet and the row amount exactly covers the
      *   outstanding balance, “Add payment” otherwise.

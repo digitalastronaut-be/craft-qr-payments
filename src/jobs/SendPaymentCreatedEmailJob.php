@@ -28,6 +28,9 @@ use RuntimeException;
 class SendPaymentCreatedEmailJob extends SendTemplatedEmailJob {
     public int $paymentId;
 
+    /** The `statusHistory` entry (`Payment::HISTORY_TYPE_CREATED`) this email was sent for — see `EmailLogService`. */
+    public ?string $historyEntryId = null;
+
     private ?Payment $payment = null;
 
     /**
@@ -44,7 +47,14 @@ class SendPaymentCreatedEmailJob extends SendTemplatedEmailJob {
      * @return string[]
      */
     public function __sleep(): array {
-        return ['paymentId'];
+        return ['paymentId', 'historyEntryId', 'triggeredByUserId'];
+    }
+
+    /**
+     * @return array
+     */
+    protected function getLogContext(): array {
+        return ['paymentId' => $this->paymentId, 'historyEntryId' => $this->historyEntryId];
     }
 
     /**

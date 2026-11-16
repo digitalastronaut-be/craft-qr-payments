@@ -79,6 +79,11 @@ class SubscriptionTypesService extends Component {
             'paymentTypeId' => $subscriptionType->paymentTypeId,
             'amount' => MoneyHelper::toDecimal($subscriptionType->getAmount()) ?: null,
             'interval' => $subscriptionType->interval,
+            'subscriptionRequestedTemplate' => $subscriptionType->subscriptionRequestedTemplate,
+            'subscriptionCancelledTemplate' => $subscriptionType->subscriptionCancelledTemplate,
+            'subscriptionExpiredTemplate' => $subscriptionType->subscriptionExpiredTemplate,
+            'subscriptionActivatedTemplate' => $subscriptionType->subscriptionActivatedTemplate,
+            'subscriptionExpiringTemplate' => $subscriptionType->subscriptionExpiringTemplate,
         ];
 
         $db = Craft::$app->getDb();
@@ -133,7 +138,11 @@ class SubscriptionTypesService extends Component {
      */
     private function createSubscriptionTypeQuery(): Query {
         return (new Query())
-            ->select(['id', 'uid', 'name', 'handle', 'paymentTypeId', 'amount', 'interval'])
+            ->select([
+                'id', 'uid', 'name', 'handle', 'paymentTypeId', 'amount', 'interval',
+                'subscriptionRequestedTemplate', 'subscriptionCancelledTemplate', 'subscriptionExpiredTemplate',
+                'subscriptionActivatedTemplate', 'subscriptionExpiringTemplate',
+            ])
             ->from(Table::QR_PAYMENTS_SUBSCRIPTIONTYPES)
             ->orderBy(['name' => SORT_ASC]);
     }

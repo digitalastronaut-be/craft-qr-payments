@@ -184,6 +184,7 @@ trait PluginTrait {
                 $event->rules['qr-payments/subscriptions/pause'] = 'qr-payments/subscriptions/pause';
                 $event->rules['qr-payments/subscriptions/cancel'] = 'qr-payments/subscriptions/cancel';
                 $event->rules['qr-payments/subscriptions/<elementId:\d+>'] = 'elements/edit';
+                $event->rules['qr-payments/email-log/resend'] = 'qr-payments/email-log/resend';
             }
         );
     }

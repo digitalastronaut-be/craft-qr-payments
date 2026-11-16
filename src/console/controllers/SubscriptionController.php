@@ -21,10 +21,10 @@ use yii\console\ExitCode;
  * Class SubscriptionController
  *
  * One cron entry (`qr-payments/subscription/advance`, run at least daily)
- * advances every active subscription whose `nextDueDate` has arrived:
- * `SubscriptionsService::advance()` stamps out that cycle's `Payment` and
- * pushes `nextDueDate` forward by the subscription's `interval`. No
- * gateway integration, same as a one-off payment — this only ever creates
+ * advances every active subscription whose coverage has run out (see
+ * `Subscription::getCoverageEnd()`): `SubscriptionsService::advance()`
+ * stamps out that cycle's `Payment`, due on that date. No gateway
+ * integration, same as a one-off payment — this only ever creates
  * the next payment for manual reconciliation.
  *
  * @author      Digitalastronaut

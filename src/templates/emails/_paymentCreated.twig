@@ -5,31 +5,46 @@
 
 {# @var payment \digitalastronaut\craftqrpayments\elements\Payment #}
 
+{% set detailRows = [
+    { label: 'Beneficiary'|t('qr-payments'), value: payment.beneficiaryName },
+    { label: 'IBAN'|t('qr-payments'), value: payment.iban },
+    { label: 'BIC'|t('qr-payments'), value: payment.bic },
+    { label: 'Amount'|t('qr-payments'), value: payment.amount|money },
+    { label: 'Reference'|t('qr-payments'), value: payment.remittanceReference },
+    { label: 'Due date'|t('qr-payments'), value: payment.dueDate ? payment.dueDate|date('d F Y') : null },
+]|filter(row => row.value) %}
+
 {# ======================= #}
 {# TEMPLATE                #}
 {# ======================= #}
 {% block content %}
-    <h2 style="{{ heading2Style }}">Hello,</h2>
+    <h1 style="{{ headingStyle }}">{{ 'Payment request'|t('qr-payments') }}</h1>
 
-    <p style="{{ textStyle }}" style="margin: 0 0 24px 0; line-height: 1.5;">
-        {{ "A payment request for"|t }} {{ payment.amount|money }} {{ "has been created for you. Scan the QR code below with your banking app to pay instantly:"|t }}
+    <p style="{{ textStyle }}">
+        {{ 'A payment of {amount} has been requested from you.'|t('qr-payments', { amount: payment.amount|money }) }}
+        {{ 'Scan the QR code below with your banking app to pay instantly.'|t('qr-payments') }}
     </p>
 
-    <img src="{{ qrContentId }}" alt="Payment QR code">
+    <p style="margin: 0 0 20px 0; text-align: center;">
+        <img src="{{ qrContentId }}" width="180" height="180" alt="{{ 'Payment QR code'|t('qr-payments') }}" style="display: inline-block; width: 180px; height: 180px;">
+    </p>
 
     <hr style="{{ dividerStyle }}">
 
-    <p style="{{ textStyle }}">{{ "If you can't scan the code, you can also make a manual bank transfer using these details:"|t }}</p>
+    <p style="{{ textStyle }}">{{ 'Or transfer manually using these details:'|t('qr-payments') }}</p>
 
-    <ul>
-        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Beneficiary:"|t }}</span>{{ payment.beneficiaryName }}</li>
-        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "IBAN:"|t }}</span>{{ payment.iban }}</li>
-        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "BIC:"|t }}</span>{{ payment.bic }}</li>
-        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Amount:"|t }}</span>{{ payment.amount|money }}</li>
-        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Reference:"|t }}</span>{{ payment.remittanceReference }}</li>
-        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Due date:"|t }}</span>{{ payment.dueDate|date('Y-m-d') }}</li>
-    </ul>
+    <table style="{{ panelStyle }}" cellpadding="0" cellspacing="0" role="presentation">
+        {% for row in detailRows %}
+            <tr>
+                <td style="{{ panelLabelCellStyle }}{{ not loop.first ? panelRowBorderStyle : '' }}">{{ row.label }}</td>
+                <td style="{{ panelValueCellStyle }}{{ not loop.first ? panelRowBorderStyle : '' }}">{{ row.value }}</td>
+            </tr>
+        {% endfor %}
+    </table>
 
-    <p>{{ "Please make sure to use the reference above so we can match your payment to your order."|t }}</p>
+    <p style="{{ textStyle }} margin-bottom: 0;">{{ 'Make sure to use the reference above so your payment can be matched automatically.'|t('qr-payments') }}</p>
+
+    <p style="margin: 24px 0 0 0; text-align: center;">
+        <a href="{{ payment.getUrl() }}" style="{{ buttonStyle }}">{{ 'View payment'|t('qr-payments') }}</a>
+    </p>
 {% endblock %}
-

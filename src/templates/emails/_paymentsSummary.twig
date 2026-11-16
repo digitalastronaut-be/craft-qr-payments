@@ -10,30 +10,47 @@
 {# TEMPLATE                #}
 {# ======================= #}
 {% block content %}
-    <h2 style="{{ heading2Style }}">{{ "“{type}” payments still awaiting processing"|t('qr-payments', { type: paymentType.name }) }}</h2>
+    <h1 style="{{ headingStyle }}">{{ '“{type}” payments still awaiting processing'|t('qr-payments', { type: paymentType.name }) }}</h1>
 
     <p style="{{ textStyle }}">
-        {{ "The following {count} payment(s) are still pending and haven’t been matched to a bank transfer yet:"|t('qr-payments', { count: payments|length }) }}
+        {{ 'The following {count} payment(s) are still pending and haven’t been matched to a bank transfer yet:'|t('qr-payments', { count: payments|length }) }}
     </p>
 
-    <table style="width: 100%; border-collapse: collapse;">
+    {# Two columns rather than the four a plain data table would want —
+       a wide multi-column table is the kind of thing that reflows badly
+       (or just gets clipped) once an email client squeezes it onto a
+       phone screen. Reference/days-left/email all stack inside the one
+       "Payment" cell instead, same way the panel-style details further
+       up this template's siblings already favor a narrow, stacked
+       layout over a wide one. #}
+    <table style="width: 100%; border-collapse: collapse; margin: 20px 0;" cellpadding="0" cellspacing="0" role="presentation">
         <thead>
             <tr>
-                <th style="{{ tableHeaderStyle }}">{{ "Reference"|t('qr-payments') }}</th>
-                <th style="{{ tableHeaderStyle }}">{{ "Amount"|t('qr-payments') }}</th>
-                <th style="{{ tableHeaderStyle }}">{{ "Due date"|t('qr-payments') }}</th>
-                <th style="{{ tableHeaderStyle }}">{{ "Email"|t('qr-payments') }}</th>
+                <th style="{{ tableHeaderStyle }}">{{ 'Payment'|t('qr-payments') }}</th>
+                <th style="{{ tableHeaderStyle }} text-align: right;">{{ 'Price'|t('qr-payments') }}</th>
             </tr>
         </thead>
         <tbody>
             {% for payment in payments %}
-                <tr>
-                    <td style="{{ tableCellStyle }}"><a href="{{ payment.getCpEditUrl() }}">{{ payment.remittanceReference }}</a></td>
-                    <td style="{{ tableCellStyle }}">{{ payment.amount|money }}</td>
-                    <td style="{{ tableCellStyle }}">{{ payment.dueDate ? payment.dueDate|date('Y-m-d') : '—' }}</td>
-                    <td style="{{ tableCellStyle }}">{{ payment.email }}</td>
+                <tr style="{{ loop.index is even ? 'background-color: #f9fafb;' : '' }}">
+                    <td style="{{ tableCellStyle }}">
+                        <div><a href="{{ payment.getCpEditUrl() }}" style="color: #111827; font-weight: 600; text-decoration: none;">{{ payment.remittanceReference }}</a></div>
+                        {# Spelled out here, unlike the CP element index's
+                           own use of `getDueInLabel()` — that one already
+                           sits under a column literally labeled "Expires
+                           in", so repeating it there would be redundant. #}
+                        <div style="margin-top: 4px; font-size: 13px; color: #6b7280;">
+                            {{ payment.getDueInLabel() ? 'Expires in {duration}'|t('qr-payments', { duration: payment.getDueInLabel() }) : '—' }}
+                        </div>
+                        <div style="font-size: 13px; color: #6b7280;">{{ payment.email }}</div>
+                    </td>
+                    <td style="{{ tableCellStyle }} text-align: right; font-weight: 600; color: #111827;">{{ payment.amount|money }}</td>
                 </tr>
             {% endfor %}
         </tbody>
     </table>
+
+    <p style="margin: 24px 0 0 0; text-align: center;">
+        <a href="{{ cpUrl('qr-payments/payments') }}" style="{{ buttonStyle }}">{{ 'View all payments'|t('qr-payments') }}</a>
+    </p>
 {% endblock %}

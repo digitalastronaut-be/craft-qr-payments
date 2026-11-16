@@ -18,6 +18,7 @@ use craft\web\Response;
 
 use digitalastronaut\craftqrpayments\models\SubscriptionType;
 use digitalastronaut\craftqrpayments\QrPayments;
+use digitalastronaut\craftqrpayments\services\EmailPreviewService;
 
 use yii\base\Action;
 use yii\web\BadRequestHttpException;
@@ -83,6 +84,38 @@ class SubscriptionTypesController extends Controller {
     }
 
     /**
+     * Renders one of the five subscription emails against fake test
+     * data, for the live preview box under its field on the Emails tab
+     * — see `EmailPreviewService`. Loaded straight into an `<iframe>` by
+     * `_edit.twig`, so this returns the rendered email itself rather
+     * than JSON. Shared with `PaymentTypesController::actionPreviewEmail()`
+     * only through `EmailPreviewService`, which already dispatches on
+     * `emailKey` regardless of which kind of type it belongs to.
+     *
+     * @return Response
+     * @throws BadRequestHttpException if `emailKey` isn't one of `EmailPreviewService`'s known template-override attributes
+     */
+    public function actionPreviewEmail(): Response {
+        $emailKey = $this->request->getRequiredQueryParam('emailKey');
+
+        if (!EmailPreviewService::isValidEmailKey($emailKey)) {
+            throw new BadRequestHttpException("Invalid email key: {$emailKey}");
+        }
+
+        $template = $this->request->getQueryParam('template') ?: null;
+        $typeName = $this->request->getQueryParam('typeName') ?: null;
+        $emailPreview = QrPayments::getInstance()->getEmailPreview();
+
+        $html = $template !== null
+            ? $emailPreview->renderCustom($emailKey, $template, $typeName)
+            : $emailPreview->renderDefault($emailKey, $typeName);
+
+        $this->response->getHeaders()->set('Content-Type', 'text/html; charset=UTF-8');
+
+        return $this->asRaw($html);
+    }
+
+    /**
      * @return Response|null
      * @throws BadRequestHttpException if the posted `subscriptionTypeId` doesn't match a real subscription type
      */
@@ -107,6 +140,11 @@ class SubscriptionTypesController extends Controller {
         $subscriptionType->paymentTypeId = (int) $this->request->getRequiredBodyParam('paymentTypeId');
         $subscriptionType->amount = $this->amountFromRequest();
         $subscriptionType->interval = $this->request->getRequiredBodyParam('interval');
+        $subscriptionType->subscriptionRequestedTemplate = $this->request->getBodyParam('subscriptionRequestedTemplate', '');
+        $subscriptionType->subscriptionCancelledTemplate = $this->request->getBodyParam('subscriptionCancelledTemplate', '');
+        $subscriptionType->subscriptionExpiredTemplate = $this->request->getBodyParam('subscriptionExpiredTemplate', '');
+        $subscriptionType->subscriptionActivatedTemplate = $this->request->getBodyParam('subscriptionActivatedTemplate', '');
+        $subscriptionType->subscriptionExpiringTemplate = $this->request->getBodyParam('subscriptionExpiringTemplate', '');
 
         if (!$subscriptionTypes->saveSubscriptionType($subscriptionType)) {
             $this->setFailFlash(Craft::t('qr-payments', 'Couldn’t save subscription type.'));
@@ -142,18 +180,17 @@ class SubscriptionTypesController extends Controller {
         }
 
         if (!$subscriptionTypes->deleteSubscriptionType($subscriptionType)) {
-            return $this->asJson([
-                'success' => false,
-                'message' => Craft::t('qr-payments', 'Couldn’t delete “{name}” — subscriptions still use it.', [
-                    'name' => $subscriptionType->name,
-                ]),
-            ]);
+            // Craft.VueAdminTable's delete button only shows the fail
+            // message (and skips the success notice + table reload) when
+            // the request actually rejects — a 200 response with a
+            // `success: false` body still resolves, so this must set a
+            // non-2xx status via asFailure(), not a plain asJson() array.
+            return $this->asFailure(Craft::t('qr-payments', 'Couldn’t delete “{name}” — subscriptions still use it.', [
+                'name' => $subscriptionType->name,
+            ]));
         }
 
-        return $this->asJson([
-            'success' => true,
-            'message' => Craft::t('qr-payments', '“{name}” deleted.', ['name' => $subscriptionType->name]),
-        ]);
+        return $this->asSuccess(Craft::t('qr-payments', '“{name}” deleted.', ['name' => $subscriptionType->name]));
     }
 
     /**

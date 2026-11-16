@@ -82,18 +82,12 @@ class PaymentsController extends Controller {
     public function actionHistoryEntryModal(int $elementId, string $type): Response {
         $this->requirePermission('qr-payments:access-payments');
 
-        $historyTypes = Payment::historyTypes();
+        $labels = self::postableHistoryTypeLabels();
 
-        if (!isset($historyTypes[$type])) throw new BadRequestHttpException('Invalid history entry type.');
+        if (!isset($labels[$type])) throw new BadRequestHttpException('Invalid history entry type.');
 
         $payment = $this->paymentById($elementId);
         $this->userAuthorizedToSave($payment);
-
-        $labels = [
-            Payment::HISTORY_TYPE_PAYMENT => Craft::t('qr-payments', 'Add payment'),
-            Payment::HISTORY_TYPE_REFUND => Craft::t('qr-payments', 'Refund'),
-            Payment::HISTORY_TYPE_CANCELLATION => Craft::t('qr-payments', 'Cancel payment'),
-        ];
 
         return $this->asCpModal()
             ->action('qr-payments/payments/save-history-entry')
@@ -118,9 +112,8 @@ class PaymentsController extends Controller {
         $this->requirePermission('qr-payments:access-payments');
 
         $type = (string) $this->request->getRequiredBodyParam('type');
-        $historyTypes = Payment::historyTypes();
 
-        if (!isset($historyTypes[$type])) {
+        if (!isset(self::postableHistoryTypeLabels()[$type])) {
             throw new BadRequestHttpException('Invalid history entry type.');
         }
 
@@ -230,7 +223,7 @@ class PaymentsController extends Controller {
 
         $variables = [
             'payment' => $payment,
-            'qrCodeDataUri' => $payment->getQrCodeDataUri(),
+            'qrCodeDataUri' => $payment->getPayableQrCodeDataUri(),
         ];
 
         $override = $payment->getType()->payTemplate;
@@ -291,5 +284,22 @@ class PaymentsController extends Controller {
         }
 
         return $user;
+    }
+
+    /**
+     * The subset of `Payment::historyTypes()` an admin can manually add
+     * through `actionHistoryEntryModal()`/`actionSaveHistoryEntry()` —
+     * deliberately narrower than the full registry, which also includes
+     * system-only entries (`HISTORY_TYPE_CREATED`, stamped automatically
+     * on a payment's first save) that have no business being posted here.
+     *
+     * @return array<string, string> Type handle => button/modal label
+     */
+    private static function postableHistoryTypeLabels(): array {
+        return [
+            Payment::HISTORY_TYPE_PAYMENT => Craft::t('qr-payments', 'Add payment'),
+            Payment::HISTORY_TYPE_REFUND => Craft::t('qr-payments', 'Refund'),
+            Payment::HISTORY_TYPE_CANCELLATION => Craft::t('qr-payments', 'Cancel payment'),
+        ];
     }
 }

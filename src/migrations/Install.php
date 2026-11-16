@@ -52,6 +52,7 @@ class Install extends Migration {
         $this->createSubscriptionTypesTable();
         $this->createSubscriptionsTable();
         $this->createPaymentsTable();
+        $this->createEmailLogTable();
     }
 
     /**
@@ -71,6 +72,10 @@ class Install extends Migration {
         $this->addForeignKey('qr_payments_payments_subscriptionid_fk', Table::QR_PAYMENTS_PAYMENTS, 'subscriptionId', Table::QR_PAYMENTS_SUBSCRIPTIONS, 'id', 'SET NULL', null);
         $this->addForeignKey('qr_payments_payments_userid_fk', Table::QR_PAYMENTS_PAYMENTS, 'userId', Table::USERS, 'id', 'SET NULL', null);
         $this->addForeignKey(null, Table::QR_PAYMENTS_PAYMENTS, 'confirmedByUserId', Table::USERS, 'id', 'SET NULL', null);
+
+        $this->addForeignKey(null, Table::QR_PAYMENTS_EMAIL_LOG, 'paymentId', Table::QR_PAYMENTS_PAYMENTS, 'id', 'CASCADE', null);
+        $this->addForeignKey(null, Table::QR_PAYMENTS_EMAIL_LOG, 'subscriptionId', Table::QR_PAYMENTS_SUBSCRIPTIONS, 'id', 'CASCADE', null);
+        $this->addForeignKey(null, Table::QR_PAYMENTS_EMAIL_LOG, 'triggeredByUserId', Table::USERS, 'id', 'SET NULL', null);
     }
 
     /**
@@ -94,12 +99,17 @@ class Install extends Migration {
         $this->createIndex(null, Table::QR_PAYMENTS_PAYMENTS, 'subscriptionId', false);
         $this->createIndex(null, Table::QR_PAYMENTS_PAYMENTS, 'userId', false);
         $this->createIndex(null, Table::QR_PAYMENTS_PAYMENTS, 'confirmedByUserId', false);
+
+        $this->createIndex(null, Table::QR_PAYMENTS_EMAIL_LOG, 'paymentId', false);
+        $this->createIndex(null, Table::QR_PAYMENTS_EMAIL_LOG, 'subscriptionId', false);
+        $this->createIndex(null, Table::QR_PAYMENTS_EMAIL_LOG, 'historyEntryId', false);
     }
 
     /**
      * @return void
      */
     public function dropTables(): void {
+        $this->dropTableIfExists(Table::QR_PAYMENTS_EMAIL_LOG);
         $this->dropTableIfExists(Table::QR_PAYMENTS_PAYMENTS);
         $this->dropTableIfExists(Table::QR_PAYMENTS_SUBSCRIPTIONS);
         $this->dropTableIfExists(Table::QR_PAYMENTS_SUBSCRIPTIONTYPES);
@@ -110,6 +120,7 @@ class Install extends Migration {
      * @return void
      */
     public function dropForeignKeys(): void {
+        $this->dropAllForeignKeysToTable(Table::QR_PAYMENTS_EMAIL_LOG);
         $this->dropAllForeignKeysToTable(Table::QR_PAYMENTS_PAYMENTS);
         $this->dropAllForeignKeysToTable(Table::QR_PAYMENTS_SUBSCRIPTIONS);
         $this->dropAllForeignKeysToTable(Table::QR_PAYMENTS_SUBSCRIPTIONTYPES);
@@ -170,11 +181,14 @@ class Install extends Migration {
 
     /**
      * `Subscription` is a Craft element (like `Payment`), so `id` is also a
-     * FK to `elements.id`. `email`/`subscriptionTypeId`/`startedAt` are
-     * nullable because a brand-new unpublished draft saves under
+     * FK to `elements.id`. `email`/`subscriptionTypeId` are nullable
+     * because a brand-new unpublished draft saves under
      * `Element::SCENARIO_ESSENTIALS`, which skips their `required` rule by
-     * design; `amount`/`interval` are nullable per-subscriber overrides
-     * that fall back to the linked `SubscriptionType`'s values when blank.
+     * design. Price/cadence live entirely on the linked `SubscriptionType`
+     * — there's no per-subscriber override, so no `amount`/`interval`
+     * columns here. No `startedAt` either — it was never read by anything
+     * (`getCoverageEnd()` derives entirely from payment history), just a
+     * historical snapshot nothing needed.
      *
      * @return void
      */
@@ -186,12 +200,9 @@ class Install extends Migration {
             'email' => $this->string(255)->null(),
             'subscriptionTypeId' => $this->integer()->null(),
 
-            'amount' => $this->decimal(12, 2)->null(),
-            'interval' => $this->string(20)->null(),
             'status' => $this->string(20)->notNull()->defaultValue('active'),
+            'statusHistory' => $this->json()->null(),
 
-            'nextDueDate' => $this->dateTime()->null(),
-            'startedAt' => $this->dateTime()->null(),
             'endedAt' => $this->dateTime()->null(),
 
             'uid' => $this->uid(),
@@ -223,13 +234,43 @@ class Install extends Migration {
             'remittanceText' => $this->string(140)->null(),
             'qrCode' => $this->binary()->null(),
 
-            'status' => $this->string(20)->notNull()->defaultValue('pending'),
+            'status' => $this->string(20)->notNull()->defaultValue('requested'),
             'statusHistory' => $this->json()->null(),
 
             'dueDate' => $this->dateTime()->null(),
             'confirmedAt' => $this->dateTime()->null(),
             'confirmedByUserId' => $this->integer()->null(),
 
+            'uid' => $this->uid(),
+        ]);
+    }
+
+    /**
+     * One generic log of every email the plugin ever attempts to send —
+     * see `m261116_090000_add_email_log_table` for the full rationale.
+     *
+     * @return void
+     */
+    private function createEmailLogTable(): void {
+        $this->createTable(Table::QR_PAYMENTS_EMAIL_LOG, [
+            'id' => $this->primaryKey(),
+
+            'paymentId' => $this->integer()->null(),
+            'subscriptionId' => $this->integer()->null(),
+            'historyEntryId' => $this->string(36)->null(),
+
+            'jobClass' => $this->string(255)->notNull(),
+            'jobParams' => $this->json()->notNull(),
+
+            'recipient' => $this->string(255)->notNull(),
+            'subject' => $this->string(255)->notNull(),
+            'status' => $this->string(20)->notNull(),
+            'error' => $this->text()->null(),
+
+            'triggeredByUserId' => $this->integer()->null(),
+
+            'dateCreated' => $this->dateTime()->notNull(),
+            'dateUpdated' => $this->dateTime()->notNull(),
             'uid' => $this->uid(),
         ]);
     }

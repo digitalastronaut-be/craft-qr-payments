@@ -1,0 +1,24 @@
+{# ======================= #}
+{# PROPERTIES              #}
+{# ======================= #}
+{% extends "qr-payments/emails/_layout" %}
+
+{# @var subscription \digitalastronaut\craftqrpayments\elements\Subscription #}
+{# @var paymentUrl string|null The payment that activated this subscription — see `SendSubscriptionActivatedEmailJob::getTemplateVariables()`. #}
+
+{# ======================= #}
+{# TEMPLATE                #}
+{# ======================= #}
+{% block content %}
+    <h1 style="{{ headingStyle }}">{{ 'Subscription activated'|t('qr-payments') }}</h1>
+
+    <p style="{{ textStyle }}{{ paymentUrl ? '' : ' margin-bottom: 0;' }}">
+        {{ 'Your subscription to'|t('qr-payments') }} <strong>{{ subscription.subscriptionType.name }}</strong> {{ 'is now active. Thanks for subscribing!'|t('qr-payments') }}
+    </p>
+
+    {% if paymentUrl %}
+        <p style="margin: 24px 0 0 0; text-align: center;">
+            <a href="{{ paymentUrl }}" style="{{ buttonStyle }}">{{ 'View payment'|t('qr-payments') }}</a>
+        </p>
+    {% endif %}
+{% endblock %}

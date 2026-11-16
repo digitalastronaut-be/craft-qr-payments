@@ -20,6 +20,7 @@ use digitalastronaut\craftqrpayments\elements\Payment;
 use digitalastronaut\craftqrpayments\QrPayments;
 
 use RuntimeException;
+use Throwable;
 
 /**
  * Class SendPaymentsSummaryEmailJob
@@ -37,6 +38,13 @@ use RuntimeException;
  * `Payment` objects themselves (queue jobs are serialized), so both are
  * re-fetched fresh at execute().
  *
+ * Doesn't extend `SendTemplatedEmailJob`: that base assumes one recipient
+ * per job, and this one fans the same rendered content out to every
+ * recipient on `$recipientEmails` — so it logs each send to
+ * `EmailLogService` itself instead, one row per recipient (a resend of
+ * any one of those rows just re-sends the whole digest to everyone on
+ * the list again, which is the only sane behavior for a shared digest).
+ *
  * @author      Digitalastronaut
  * @package     QrPayments
  * @since       v1.5.0-beta
@@ -46,6 +54,16 @@ class SendPaymentsSummaryEmailJob extends BaseJob {
 
     /** @var string[] */
     public array $recipientEmails = [];
+
+    /** @see SendTemplatedEmailJob::$triggeredByUserId */
+    public ?int $triggeredByUserId = null;
+
+    /**
+     * @return string[]
+     */
+    public function __sleep(): array {
+        return ['paymentTypeId', 'recipientEmails', 'triggeredByUserId'];
+    }
 
     /**
      * @param QueueInterface $queue
@@ -60,7 +78,7 @@ class SendPaymentsSummaryEmailJob extends BaseJob {
             ->typeId($this->paymentTypeId)
             // Overpaid isn't included here — that's money we owe the
             // customer back, not a balance still owed to us.
-            ->status([Payment::STATUS_PENDING, Payment::STATUS_AWAITING_CONFIRMATION, Payment::STATUS_EXPIRED, Payment::STATUS_PARTIAL])
+            ->status([Payment::STATUS_REQUESTED, Payment::STATUS_AWAITING_CONFIRMATION, Payment::STATUS_EXPIRED, Payment::STATUS_PARTIAL])
             ->orderBy(['dueDate' => SORT_ASC])
             ->all();
 
@@ -78,15 +96,42 @@ class SendPaymentsSummaryEmailJob extends BaseJob {
         ]);
 
         foreach ($this->recipientEmails as $email) {
-            $message = Craft::$app->getMailer()->compose()
-                ->setTo($email)
-                ->setSubject($subject)
-                ->setHtmlBody($html);
+            try {
+                $message = Craft::$app->getMailer()->compose()
+                    ->setTo($email)
+                    ->setSubject($subject)
+                    ->setHtmlBody($html);
 
-            if (!$message->send()) {
-                throw new RuntimeException("Mailer refused to send \"{$template}\" to {$email}.");
+                if (!$message->send()) {
+                    throw new RuntimeException("Mailer refused to send \"{$template}\" to {$email}.");
+                }
+            } catch (Throwable $e) {
+                $this->log($email, $subject, 'failed', $e->getMessage());
+
+                throw $e;
             }
+
+            $this->log($email, $subject, 'sent', null);
         }
+    }
+
+    /**
+     * @param string $recipient
+     * @param string $subject
+     * @param string $status
+     * @param string|null $error
+     * @return void
+     */
+    private function log(string $recipient, string $subject, string $status, ?string $error): void {
+        QrPayments::getInstance()->getEmailLog()->log([
+            'jobClass' => static::class,
+            'jobParams' => ['paymentTypeId' => $this->paymentTypeId, 'recipientEmails' => $this->recipientEmails],
+            'recipient' => $recipient,
+            'subject' => $subject,
+            'status' => $status,
+            'error' => $error,
+            'triggeredByUserId' => $this->triggeredByUserId,
+        ]);
     }
 
     /**

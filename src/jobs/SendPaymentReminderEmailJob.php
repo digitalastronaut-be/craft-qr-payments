@@ -47,7 +47,14 @@ class SendPaymentReminderEmailJob extends SendTemplatedEmailJob {
      * @return string[]
      */
     public function __sleep(): array {
-        return ['paymentId'];
+        return ['paymentId', 'triggeredByUserId'];
+    }
+
+    /**
+     * @return array
+     */
+    protected function getLogContext(): array {
+        return ['paymentId' => $this->paymentId];
     }
 
     /**

@@ -13,7 +13,7 @@ There's no dedicated JSON status-check endpoint — a payment is a normal Craft 
 A few things worth calling out:
 
 - `.status(null)` is needed because element queries only return *enabled* elements by default, and a payment's enabled state isn't the same thing as its [payment status](/plugin/payment-statuses) — without it, a cancelled payment (for example) might not come back at all.
-- Call `.getStatus()`, not `.status` — the plain `status` property is whatever was last saved, but `getStatus()` also accounts for a pending payment's due date having passed since then (returning `expired` without needing a fresh save first). Always prefer the method.
+- Call `.getStatus()`, not `.status` — the plain `status` property is whatever was last saved, but `getStatus()` also accounts for a requested payment's due date having passed since then (returning `expired` without needing a fresh save first). Always prefer the method.
 - `payment.getAmount()`, `.remittanceReference`, `.dueDate` and the rest of the element's normal attributes are all available the same way.
 
 ## Without a full page reload

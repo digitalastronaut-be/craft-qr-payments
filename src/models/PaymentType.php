@@ -12,10 +12,13 @@
 namespace digitalastronaut\craftqrpayments\models;
 
 use Craft;
+use craft\base\Chippable;
+use craft\base\CpEditable;
 use craft\base\Model;
 use craft\db\Query;
 use craft\elements\User;
 use craft\helpers\App;
+use craft\helpers\UrlHelper;
 use craft\models\FieldLayout;
 use craft\web\View;
 
@@ -37,11 +40,16 @@ use InvalidArgumentException;
  * unlike the plugin's global `Settings` — it stays editable on a live
  * site even with `allowAdminChanges` off.
  *
+ * Implements `Chippable`/`CpEditable` purely so `Cp::chipHtml()` can
+ * render it — e.g. `Payment`'s own "Type" column — the same
+ * hyperlinked-chip look a related element would get, even though this is
+ * a plain model, not an element. Same reasoning as `SubscriptionType`.
+ *
  * @author      Digitalastronaut
  * @package     QrPayments
  * @since       v1.1.0-beta
  */
-class PaymentType extends Model {
+class PaymentType extends Model implements Chippable, CpEditable {
     public ?int $id = null;
     public ?string $uid = null;
 
@@ -162,6 +170,34 @@ class PaymentType extends Model {
         $bic = App::parseEnv($this->bic);
 
         return $bic ? (string) $bic : null;
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public static function get(string|int $id): ?static {
+        return QrPayments::getInstance()->getPaymentTypes()->getPaymentTypeById((int) $id);
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function getId(): string|int|null {
+        return $this->id;
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function getUiLabel(): string {
+        return $this->name;
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function getCpEditUrl(): ?string {
+        return $this->id !== null ? UrlHelper::cpUrl("qr-payments/payment-types/{$this->id}") : null;
     }
 
     /**

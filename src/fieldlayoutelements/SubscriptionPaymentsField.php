@@ -21,6 +21,7 @@ use craft\helpers\MoneyHelper;
 
 use digitalastronaut\craftqrpayments\elements\Payment;
 use digitalastronaut\craftqrpayments\elements\Subscription;
+use digitalastronaut\craftqrpayments\helpers\HumanDuration;
 
 use yii\base\NotSupportedException;
 
@@ -31,9 +32,10 @@ use yii\base\NotSupportedException;
  * (`SubscriptionsService::advance()`), newest first — the only place that
  * link between the two is visible from the subscription side;
  * `Payment::getSubscription()`/`Payment::getType()` already cover reading
- * it from the payment side. Never rendered for a brand-new unpublished
- * draft, which can't possibly have generated a payment yet — same
- * reasoning `Subscription::statusActionButtonsHtml()` already uses.
+ * it from the payment side. Still rendered (empty) for a brand-new
+ * unpublished draft, which can't possibly have generated a payment yet —
+ * same as `SubscriptionStatusHistoryField` always rendering its own empty
+ * state, rather than the field disappearing outright.
  *
  * @author      Digitalastronaut
  * @package     QrPayments
@@ -54,27 +56,30 @@ class SubscriptionPaymentsField extends FieldLayoutElement {
      * @return string|null
      */
     public function formHtml(?ElementInterface $element = null, bool $static = false): ?string {
-        if (!$element instanceof Subscription || !$element->id || $element->getIsUnpublishedDraft()) return null;
+        if (!$element instanceof Subscription) return null;
 
-        $payments = Payment::find()
-            ->subscriptionId($element->id)
-            ->status(null)
-            // `id` as a tiebreaker: a batch of payments stamped out in quick
-            // succession (e.g. `SubscriptionsService::advance()` run several
-            // times in a row) can land in the same `dateCreated` second,
-            // which would otherwise leave their relative order undefined.
-            ->orderBy(['dateCreated' => SORT_DESC, 'id' => SORT_DESC])
-            ->all();
+        $payments = ($element->id && !$element->getIsUnpublishedDraft())
+            ? Payment::find()
+                ->subscriptionId($element->id)
+                ->status(null)
+                // `id` as a tiebreaker: a batch of payments stamped out in
+                // quick succession (e.g. `SubscriptionsService::advance()`
+                // run several times in a row) can land in the same
+                // `dateCreated` second, which would otherwise leave their
+                // relative order undefined.
+                ->orderBy(['dateCreated' => SORT_DESC, 'id' => SORT_DESC])
+                ->all()
+            : [];
 
         $rows = array_map(fn(Payment $payment) => $this->rowHtml($payment), $payments);
 
         $table = Html::tag('table',
             Html::tag('thead', Html::tag('tr',
                 Html::tag('th', Craft::t('qr-payments', 'Reference')) .
-                Html::tag('th', Craft::t('qr-payments', 'Amount')) .
                 Html::tag('th', Craft::t('qr-payments', 'Status')) .
-                Html::tag('th', Craft::t('qr-payments', 'Due date')) .
-                Html::tag('th', Craft::t('qr-payments', 'Date created'))
+                Html::tag('th', Craft::t('qr-payments', 'Amount')) .
+                Html::tag('th', Craft::t('qr-payments', 'Expires in')) .
+                Html::tag('th', Craft::t('qr-payments', 'Actions'))
             )) .
             Html::tag('tbody', implode('', $rows)),
             ['class' => ['data', 'fullwidth']],
@@ -102,15 +107,15 @@ class SubscriptionPaymentsField extends FieldLayoutElement {
         ]);
 
         $amountCell = Html::encode(MoneyHelper::toString($payment->getAmount()) ?: '');
-        $dueDateCell = $payment->dueDate ? Html::encode(Craft::$app->getFormatter()->asDate($payment->dueDate, 'short')) : '';
-        $createdCell = Html::encode(Craft::$app->getFormatter()->asDatetime($payment->dateCreated, 'short'));
+        $expiresInCell = Html::encode(HumanDuration::until($payment->dueDate));
+        $actionsCell = $payment->historyActionButtonsHtml(small: true);
 
         return Html::tag('tr',
             Html::tag('td', $referenceCell) .
-            Html::tag('td', $amountCell) .
             Html::tag('td', $statusCell) .
-            Html::tag('td', $dueDateCell) .
-            Html::tag('td', $createdCell),
+            Html::tag('td', $amountCell) .
+            Html::tag('td', $expiresInCell) .
+            Html::tag('td', $actionsCell),
         );
     }
 

@@ -1,0 +1,165 @@
+{# @var type \digitalastronaut\craftqrpayments\models\PaymentType|\digitalastronaut\craftqrpayments\models\SubscriptionType #}
+{# @var actionRoute string Controller action that renders the preview, e.g. `qr-payments/payment-types/preview-email` or `qr-payments/subscription-types/preview-email`. #}
+{# @var emailKey string One of `EmailPreviewService::EMAIL_*` — also a template-override attribute on `type`. #}
+{# @var fieldLabel string #}
+{# @var fieldInstructions string #}
+{# @var placeholder string #}
+{# @var previewTypeName string|null Shown in the preview in place of this (possibly still-unsaved) type's own name — only matters for the emails that actually display it (the payments summary and every subscription email). #}
+
+{#
+  One autosuggest field for an email template override, plus a live
+  preview underneath it rendered against fake test data — the custom
+  override once a template path is entered, the plugin's own bundled
+  default otherwise. Shared by `PaymentType`'s and `SubscriptionType`'s
+  Emails tabs, which each repeat this same field+preview shape several
+  times, one per overridable email — see `EmailPreviewService` and
+  `PaymentTypesController`/`SubscriptionTypesController::
+  actionPreviewEmail()`. Also owns the JS/CSS at the bottom shared by
+  every one of those fields, guarded so it only binds once no matter
+  how many times (or on how many different pages) this partial is
+  included.
+#}
+
+{% import '_includes/forms.twig' as forms %}
+
+{% set value = attribute(type, emailKey) %}
+{% set previewTypeName = previewTypeName ?? null %}
+
+{% set previewParams = {emailKey: emailKey}
+    |merge(value ? {template: value} : {})
+    |merge(previewTypeName ? {typeName: previewTypeName} : {}) %}
+
+{#
+  `width-50` is a direct child of the `.flex-fields` wrapper in the
+  calling `_edit.twig`, so this whole block — field and preview
+  together — is what sits two per row, same as `craft\helpers\Cp`'s own
+  `width-50` usage for paired fields.
+#}
+<div class="qrp-email-field width-50" data-qrp-email-field data-preview-base-url="{{ actionUrl(actionRoute) }}" data-email-key="{{ emailKey }}" data-preview-type-name="{{ previewTypeName }}">
+    {{ forms.autosuggestField({
+        label: fieldLabel,
+        instructions: fieldInstructions,
+        tip: 'Leave blank to use the plugin’s bundled default.'|t('qr-payments'),
+        id: emailKey,
+        name: emailKey,
+        value: value,
+        errors: type.getErrors(emailKey),
+        placeholder: placeholder,
+        suggestTemplates: true,
+    }) }}
+
+    <div class="qrp-email-preview">
+        <iframe class="qrp-email-preview-frame" data-qrp-preview-frame sandbox="allow-same-origin" title="{{ fieldLabel }}" src="{{ actionUrl(actionRoute, previewParams) }}"></iframe>
+    </div>
+</div>
+
+{% js %}
+(() => {
+    if (window.qrpEmailPreviewBound) return;
+    window.qrpEmailPreviewBound = true;
+
+    const debounce = (fn, wait) => {
+        let timeout;
+        return (...args) => {
+            window.clearTimeout(timeout);
+            timeout = window.setTimeout(() => fn(...args), wait);
+        };
+    };
+
+    const updatePreview = (field) => {
+        const input = field.querySelector('.autosuggest-container input');
+        const frame = field.querySelector('[data-qrp-preview-frame]');
+        const template = input ? input.value.trim() : '';
+
+        const url = new URL(field.dataset.previewBaseUrl, window.location.href);
+        url.searchParams.set('emailKey', field.dataset.emailKey);
+
+        if (template) url.searchParams.set('template', template);
+        if (field.dataset.previewTypeName) url.searchParams.set('typeName', field.dataset.previewTypeName);
+
+        // Cache-busts every update, including a plain blur with no
+        // actual change — the path field rarely changes once set, but an
+        // edit to the template file it points at should still show up
+        // without a full page reload.
+        url.searchParams.set('_', Date.now());
+
+        frame.src = url.toString();
+    };
+
+    const debouncedUpdate = debounce(updatePreview, 600);
+
+    document.addEventListener('input', (event) => {
+        const field = event.target.closest('[data-qrp-email-field]');
+        if (!field || !event.target.matches('.autosuggest-container input')) return;
+
+        debouncedUpdate(field);
+    });
+
+    document.addEventListener('blur', (event) => {
+        const field = event.target.closest('[data-qrp-email-field]');
+        if (!field || !event.target.matches('.autosuggest-container input')) return;
+
+        updatePreview(field);
+    }, true);
+
+    // Grows the iframe to fit its own content instead of a fixed height,
+    // so a short email doesn't leave dead space and a long one doesn't
+    // create a scrollbar nested inside the CP's own page scroll. Reading
+    // `contentDocument` needs `allow-same-origin` on the iframe's
+    // `sandbox` — still no `allow-scripts`, so nothing inside the preview
+    // can actually run.
+    const resizeFrame = (frame) => {
+        try {
+            const doc = frame.contentDocument;
+            const root = doc && doc.documentElement;
+            if (!root) return;
+
+            // A field's tab starts out `hidden` (Craft's CP tabs, not this
+            // plugin's) unless it's the one selected on load, and a hidden
+            // ancestor reports 0 for every layout measurement regardless
+            // of the iframe's actual content — so a 0 here means "not
+            // measurable right now", not "empty", and is left alone
+            // rather than baked in. The tab-click listener below is what
+            // corrects it once the tab actually becomes visible.
+            const height = Math.max(root.scrollHeight, doc.body ? doc.body.scrollHeight : 0);
+            if (height > 0) frame.style.height = `${height}px`;
+        } catch {
+            // Leave the current height alone if the frame isn't readable yet.
+        }
+    };
+
+    const resizeAllFrames = () => document.querySelectorAll('[data-qrp-preview-frame]').forEach(resizeFrame);
+
+    resizeAllFrames();
+
+    document.querySelectorAll('[data-qrp-preview-frame]').forEach((frame) => {
+        frame.addEventListener('load', () => resizeFrame(frame));
+    });
+
+    // Switching CP tabs doesn't reload any iframe, so nothing else would
+    // re-measure one that finished loading while its tab was still
+    // hidden — wait a tick for Craft's own tab JS to finish toggling
+    // visibility first.
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('[role="tab"]')) return;
+
+        requestAnimationFrame(resizeAllFrames);
+    });
+})();
+{% endjs %}
+
+{% css %}
+.qrp-email-preview {
+    margin-top: var(--s);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+}
+
+.qrp-email-preview-frame {
+    display: block;
+    width: 100%;
+    border: none;
+    background-color: var(--white);
+}
+{% endcss %}

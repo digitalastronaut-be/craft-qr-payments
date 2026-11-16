@@ -10,6 +10,24 @@
 {% set title = isNew ? "Create a new subscription type"|t('qr-payments') : subscriptionType.name %}
 {% set selectedSettingsNavItem = 'subscriptionTypes' %}
 
+{# Which tab each attribute's error belongs under, so a validation error
+   on a field tucked away on a hidden tab doesn't just disappear into the
+   generic "Couldn't save" flash with no clue where to look. #}
+{% set generalTabAttributes = ['name', 'handle', 'paymentTypeId', 'interval', 'amount'] %}
+{% set emailsTabAttributes = ['subscriptionRequestedTemplate', 'subscriptionCancelledTemplate', 'subscriptionExpiredTemplate', 'subscriptionActivatedTemplate', 'subscriptionExpiringTemplate'] %}
+
+{% set generalTabHasErrors = generalTabAttributes|filter(attribute => subscriptionType.hasErrors(attribute))|length > 0 %}
+{% set emailsTabHasErrors = emailsTabAttributes|filter(attribute => subscriptionType.hasErrors(attribute))|length > 0 %}
+
+{% set tabs = {
+    general: { label: 'General'|t('qr-payments'), url: '#general', class: generalTabHasErrors ? 'error' : '' },
+    emails: { label: 'Emails'|t('qr-payments'), url: '#emails', class: emailsTabHasErrors ? 'error' : '' },
+} %}
+
+{# Default to whichever tab actually has the error, instead of always
+   landing back on General, so the field with the problem is visible. #}
+{% set selectedTab = selectedTab ?? (emailsTabHasErrors ? 'emails' : 'general') %}
+
 {% block content %}
     {{ actionInput('qr-payments/subscription-types/save') }}
     {{ redirectInput('qr-payments/subscription-types') }}
@@ -18,69 +36,125 @@
         <input type="hidden" name="subscriptionTypeId" value="{{ subscriptionType.id }}">
     {% endif %}
 
-    <div class="flex-fields">
-        {{ forms.textField({
-            label: 'Name'|t('qr-payments'),
-            id: 'name',
-            name: 'name',
-            value: subscriptionType.name,
-            errors: subscriptionType.getErrors('name'),
-            required: true,
-        }) }}
+    <div id="general" class="{{ selectedTab != 'general' ? 'hidden' : '' }}">
+        <div class="flex-fields">
+            {{ forms.textField({
+                label: 'Name'|t('qr-payments'),
+                id: 'name',
+                name: 'name',
+                value: subscriptionType.name,
+                errors: subscriptionType.getErrors('name'),
+                required: true,
+            }) }}
 
-        {{ forms.textField({
-            label: 'Handle'|t('qr-payments'),
-            instructions: 'How this plan is referred to from code.'|t('qr-payments'),
-            id: 'handle',
-            name: 'handle',
-            value: subscriptionType.handle,
-            errors: subscriptionType.getErrors('handle'),
-            required: true,
-            class: 'code',
-        }) }}
+            {{ forms.textField({
+                label: 'Handle'|t('qr-payments'),
+                instructions: 'How this plan is referred to from code.'|t('qr-payments'),
+                id: 'handle',
+                name: 'handle',
+                value: subscriptionType.handle,
+                errors: subscriptionType.getErrors('handle'),
+                required: true,
+                class: 'code',
+            }) }}
 
-        {% set paymentTypeOptions = [] %}
-        {% for type in paymentTypes %}
-            {% set paymentTypeOptions = paymentTypeOptions|merge([{ label: type.name, value: type.id }]) %}
-        {% endfor %}
+            {% set paymentTypeOptions = [] %}
+            {% for type in paymentTypes %}
+                {% set paymentTypeOptions = paymentTypeOptions|merge([{ label: type.name, value: type.id }]) %}
+            {% endfor %}
 
-        {{ forms.selectizeField({
-            label: 'Payment type'|t('qr-payments'),
-            instructions: 'Which payment type’s beneficiary/IBAN, custom fields, and email templates this plan’s generated payments use.'|t('qr-payments'),
-            id: 'paymentTypeId',
-            name: 'paymentTypeId',
-            options: paymentTypeOptions,
-            value: subscriptionType.paymentTypeId,
-            errors: subscriptionType.getErrors('paymentTypeId'),
-            required: true,
-        }) }}
+            {{ forms.selectizeField({
+                label: 'Payment type'|t('qr-payments'),
+                instructions: 'Which payment type’s beneficiary/IBAN, custom fields, and email templates this plan’s generated payments use.'|t('qr-payments'),
+                id: 'paymentTypeId',
+                name: 'paymentTypeId',
+                options: paymentTypeOptions,
+                value: subscriptionType.paymentTypeId,
+                errors: subscriptionType.getErrors('paymentTypeId'),
+                required: true,
+            }) }}
 
-        {% set intervalOptions = [] %}
-        {% for value, label in subscriptionType.intervals() %}
-            {% set intervalOptions = intervalOptions|merge([{ label: label, value: value }]) %}
-        {% endfor %}
+            {% set intervalOptions = [] %}
+            {% for value, label in subscriptionType.intervals() %}
+                {% set intervalOptions = intervalOptions|merge([{ label: label, value: value }]) %}
+            {% endfor %}
 
-        {{ forms.selectizeField({
-            label: 'Interval'|t('qr-payments'),
-            instructions: 'The default billing cadence. Overridable per subscriber.'|t('qr-payments'),
-            id: 'interval',
-            name: 'interval',
-            options: intervalOptions,
-            value: subscriptionType.interval,
-            errors: subscriptionType.getErrors('interval'),
-            required: true,
-        }) }}
+            {{ forms.selectizeField({
+                label: 'Interval'|t('qr-payments'),
+                instructions: 'The default billing cadence. Overridable per subscriber.'|t('qr-payments'),
+                id: 'interval',
+                name: 'interval',
+                options: intervalOptions,
+                value: subscriptionType.interval,
+                errors: subscriptionType.getErrors('interval'),
+                required: true,
+            }) }}
 
-        {{ forms.moneyField({
-            label: 'Amount'|t('qr-payments'),
-            instructions: 'The default amount charged each cycle. Overridable per subscriber.'|t('qr-payments'),
-            id: 'amount',
-            name: 'amount',
-            currency: 'EUR',
-            currencyLabel: '(EUR) €',
-            value: subscriptionType.getAmount() ? subscriptionType.getAmount().getAmount() / 100 : null,
-            errors: subscriptionType.getErrors('amount'),
-            required: true,
-        }) }}
+            {{ forms.moneyField({
+                label: 'Amount'|t('qr-payments'),
+                instructions: 'The default amount charged each cycle. Overridable per subscriber.'|t('qr-payments'),
+                id: 'amount',
+                name: 'amount',
+                currency: 'EUR',
+                currencyLabel: '(EUR) €',
+                value: subscriptionType.getAmount() ? subscriptionType.getAmount().getAmount() / 100 : null,
+                errors: subscriptionType.getErrors('amount'),
+                required: true,
+            }) }}
+        </div>
+    </div>
+
+    <div id="emails" class="{{ selectedTab != 'emails' ? 'hidden' : '' }}">
+        <div class="flex-fields">
+            {% include 'qr-payments/pages/_emailPreviewField.twig' with {
+                type: subscriptionType,
+                actionRoute: 'qr-payments/subscription-types/preview-email',
+                emailKey: 'subscriptionRequestedTemplate',
+                fieldLabel: 'Subscription requested email template'|t('qr-payments'),
+                fieldInstructions: 'Sent to the subscriber right away when a subscription of this type is requested.'|t('qr-payments'),
+                placeholder: 'templates/emails/_subscriptionRequested.twig',
+                previewTypeName: subscriptionType.name,
+            } only %}
+
+            {% include 'qr-payments/pages/_emailPreviewField.twig' with {
+                type: subscriptionType,
+                actionRoute: 'qr-payments/subscription-types/preview-email',
+                emailKey: 'subscriptionCancelledTemplate',
+                fieldLabel: 'Subscription cancelled email template'|t('qr-payments'),
+                fieldInstructions: 'Sent to the subscriber when a subscription of this type is cancelled.'|t('qr-payments'),
+                placeholder: 'templates/emails/_subscriptionCancelled.twig',
+                previewTypeName: subscriptionType.name,
+            } only %}
+
+            {% include 'qr-payments/pages/_emailPreviewField.twig' with {
+                type: subscriptionType,
+                actionRoute: 'qr-payments/subscription-types/preview-email',
+                emailKey: 'subscriptionExpiredTemplate',
+                fieldLabel: 'Subscription expired email template'|t('qr-payments'),
+                fieldInstructions: 'Sent to the subscriber when a subscription of this type expires with nothing paid to renew it.'|t('qr-payments'),
+                placeholder: 'templates/emails/_subscriptionExpired.twig',
+                previewTypeName: subscriptionType.name,
+            } only %}
+
+            {% include 'qr-payments/pages/_emailPreviewField.twig' with {
+                type: subscriptionType,
+                actionRoute: 'qr-payments/subscription-types/preview-email',
+                emailKey: 'subscriptionActivatedTemplate',
+                fieldLabel: 'Subscription activated email template'|t('qr-payments'),
+                fieldInstructions: 'Sent to the subscriber once a subscription of this type becomes active.'|t('qr-payments'),
+                placeholder: 'templates/emails/_subscriptionActivated.twig',
+                previewTypeName: subscriptionType.name,
+            } only %}
+
+            {% include 'qr-payments/pages/_emailPreviewField.twig' with {
+                type: subscriptionType,
+                actionRoute: 'qr-payments/subscription-types/preview-email',
+                emailKey: 'subscriptionExpiringTemplate',
+                fieldLabel: 'Subscription expiring email template'|t('qr-payments'),
+                fieldInstructions: 'Sent to the subscriber 7 days before a subscription of this type’s coverage runs out.'|t('qr-payments'),
+                placeholder: 'templates/emails/_subscriptionExpiring.twig',
+                previewTypeName: subscriptionType.name,
+            } only %}
+        </div>
     </div>
 {% endblock %}

@@ -5,28 +5,39 @@
 
 {# @var payment \digitalastronaut\craftqrpayments\elements\Payment #}
 
-{% set status = payment.getStatus() %}
+{% set isOverdue = payment.getStatus() == 'expired' %}
+
+{% set detailRows = [
+    { label: 'Beneficiary'|t('qr-payments'), value: payment.beneficiaryName },
+    { label: 'IBAN'|t('qr-payments'), value: payment.iban },
+    { label: 'BIC'|t('qr-payments'), value: payment.bic },
+    { label: 'Amount'|t('qr-payments'), value: payment.amount|money },
+    { label: 'Reference'|t('qr-payments'), value: payment.remittanceReference },
+    { label: 'Due date'|t('qr-payments'), value: payment.dueDate ? payment.dueDate|date('d F Y') : null },
+]|filter(row => row.value) %}
 
 {# ======================= #}
 {# TEMPLATE                #}
 {# ======================= #}
 {% block content %}
-    {% if status == 'expired' %}
-        <h2 style="{{ heading2Style }}">{{ "Your payment is overdue"|t('qr-payments') }}</h2>
-        <p style="{{ textStyle }}">{{ "The due date for the following payment has passed. Please settle it as soon as possible:"|t('qr-payments') }}</p>
-    {% else %}
-        <h2 style="{{ heading2Style }}">{{ "Your payment is due soon"|t('qr-payments') }}</h2>
-        <p style="{{ textStyle }}">{{ "This is a friendly reminder that the following payment is due in 7 days:"|t('qr-payments') }}</p>
-    {% endif %}
+    <h1 style="{{ headingStyle }}">{{ isOverdue ? 'Payment overdue'|t('qr-payments') : 'Payment due soon'|t('qr-payments') }}</h1>
 
-    <ul>
-        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Beneficiary:"|t('qr-payments') }}</span>{{ payment.beneficiaryName }}</li>
-        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "IBAN:"|t('qr-payments') }}</span>{{ payment.iban }}</li>
-        {% if payment.bic %}<li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "BIC:"|t('qr-payments') }}</span>{{ payment.bic }}</li>{% endif %}
-        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Amount:"|t('qr-payments') }}</span>{{ payment.amount|money }}</li>
-        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Reference:"|t('qr-payments') }}</span>{{ payment.remittanceReference }}</li>
-        <li style="{{ textStyle }}"><span style="{{ labelStyle }}">{{ "Due date:"|t('qr-payments') }}</span>{{ payment.dueDate|date('Y-m-d') }}</li>
-    </ul>
+    <p style="{{ textStyle }}">
+        {{ isOverdue
+            ? 'The due date for the following payment has passed. Please settle it as soon as possible:'|t('qr-payments')
+            : 'This is a friendly reminder that the following payment is due in 7 days:'|t('qr-payments') }}
+    </p>
 
-    <p style="{{ textStyle }}"><a href="{{ payment.getUrl() }}">{{ "View payment"|t('qr-payments') }}</a></p>
+    <table style="{{ panelStyle }}" cellpadding="0" cellspacing="0" role="presentation">
+        {% for row in detailRows %}
+            <tr>
+                <td style="{{ panelLabelCellStyle }}{{ not loop.first ? panelRowBorderStyle : '' }}">{{ row.label }}</td>
+                <td style="{{ panelValueCellStyle }}{{ not loop.first ? panelRowBorderStyle : '' }}">{{ row.value }}</td>
+            </tr>
+        {% endfor %}
+    </table>
+
+    <p style="margin: 24px 0 0 0; text-align: center;">
+        <a href="{{ payment.getUrl() }}" style="{{ buttonStyle }}">{{ 'View payment'|t('qr-payments') }}</a>
+    </p>
 {% endblock %}

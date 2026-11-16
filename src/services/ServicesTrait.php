@@ -31,6 +31,8 @@ trait ServicesTrait {
     public static function config(): array {
         return [
             'components' => [
+                'emailLog' => EmailLogService::class,
+                'emailPreview' => EmailPreviewService::class,
                 'epcQr' => EpcQrService::class,
                 'payments' => PaymentsService::class,
                 'paymentTypes' => PaymentTypesService::class,
@@ -56,6 +58,20 @@ trait ServicesTrait {
      */
     public function getVite(): VitePluginService {
         return $this->get('vite');
+    }
+
+    /**
+     * @return EmailLogService
+     */
+    public function getEmailLog(): EmailLogService {
+        return $this->get('emailLog');
+    }
+
+    /**
+     * @return EmailPreviewService
+     */
+    public function getEmailPreview(): EmailPreviewService {
+        return $this->get('emailPreview');
     }
 
     /**

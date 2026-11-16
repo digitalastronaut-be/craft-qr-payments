@@ -1,0 +1,18 @@
+{# ======================= #}
+{# PROPERTIES              #}
+{# ======================= #}
+{% extends "qr-payments/emails/_layout" %}
+
+{# @var subscription \digitalastronaut\craftqrpayments\elements\Subscription #}
+
+{# ======================= #}
+{# TEMPLATE                #}
+{# ======================= #}
+{% block content %}
+    <h1 style="{{ headingStyle }}">{{ 'Subscription expiring soon'|t('qr-payments') }}</h1>
+
+    <p style="{{ textStyle }} margin-bottom: 0;">
+        {{ 'Your subscription to'|t('qr-payments') }} <strong>{{ subscription.subscriptionType.name }}</strong>
+        {{ 'will expire on {date} unless it’s renewed. You’ll receive a new payment request to keep it going.'|t('qr-payments', { date: subscription.coverageEnd|date('d F Y') }) }}
+    </p>
+{% endblock %}

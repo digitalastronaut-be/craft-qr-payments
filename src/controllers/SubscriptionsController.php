@@ -12,26 +12,33 @@
 namespace digitalastronaut\craftqrpayments\controllers;
 
 use Craft;
+use craft\helpers\UrlHelper;
 use craft\web\Controller;
 use craft\web\Response;
 
 use digitalastronaut\craftqrpayments\elements\Subscription;
 use digitalastronaut\craftqrpayments\QrPayments;
 
+use Throwable;
 use yii\base\Action;
 use yii\web\BadRequestHttpException;
 
 /**
  * Class SubscriptionsController
  *
- * Only handles what Craft's own generic `elements/*` actions don't:
+ * Mostly handles what Craft's own generic `elements/*` actions don't:
  * `actionIndex()` (the native element index page) and
- * `actionActivate()`/`actionPause()`/`actionCancel()` (status transitions
- * through the service's own methods, never a raw posted `status`).
+ * `actionActivate()`/`actionCancel()` (status transitions through the
+ * service's own methods, never a raw posted `status`).
  * Creation (`elements/create`), editing, and saving all go through
  * Craft's generic actions — `Subscription::hasDrafts()` is true, so "New
  * subscription" creates an unpublished draft the same way a new Entry
- * does, rather than needing a bespoke create form.
+ * does, rather than needing a bespoke create form. The exception is
+ * `actionRequest()`, the one public/anonymous action here — a front-end
+ * "subscribe" flow has no business creating an unpublished draft and
+ * walking it through Craft's own publish flow, so it just saves a real
+ * `requested` subscription directly, same as `PaymentsController::actionRequest()`
+ * does for a one-off `Payment`.
  *
  * @author      Digitalastronaut
  * @package     QrPayments
@@ -41,16 +48,52 @@ class SubscriptionsController extends Controller {
     public const string PERMISSION_MANAGE_SUBSCRIPTIONS = 'qr-payments:manage-subscriptions';
 
     public $defaultAction = 'index';
-    protected array|int|bool $allowAnonymous = self::ALLOW_ANONYMOUS_NEVER;
+    protected array|int|bool $allowAnonymous = ['request'];
 
     /**
      * @param Action $action
      * @return bool
      */
     public function beforeAction($action): bool {
-        $this->requirePermission(self::PERMISSION_MANAGE_SUBSCRIPTIONS);
+        if ($action->id !== 'request') {
+            $this->requirePermission(self::PERMISSION_MANAGE_SUBSCRIPTIONS);
+        }
 
         return parent::beforeAction($action);
+    }
+
+    /**
+     * Creates a new `requested` subscription for the posted subscription
+     * type and immediately generates its first linked `Payment`, then
+     * redirects to that payment's pay page — same shape as
+     * `PaymentsController::actionRequest()`, just for a recurring
+     * subscription instead of a one-off payment.
+     *
+     * @return Response|null
+     */
+    public function actionRequest(): ?Response {
+        $this->requirePostRequest();
+
+        $handle = (string) $this->request->getBodyParam('subscriptionTypeHandle', '');
+        $type = $handle !== '' ? QrPayments::getInstance()->getSubscriptionTypes()->getSubscriptionTypeByHandle($handle) : null;
+
+        if ($type === null) return $this->asFailure(Craft::t('qr-payments', 'Invalid subscription type.'));
+
+        $email = $this->request->getBodyParam('email', '');
+        if (!$email) return $this->asFailure(Craft::t('qr-payments', 'Email is required.'));
+
+        try {
+            $userId = Craft::$app->getUser()->getIdentity()?->id;
+            $payment = QrPayments::getInstance()->getSubscriptions()->requestSubscription($type, $email, $userId);
+        } catch (Throwable $error) {
+            Craft::error($error->getMessage(), __METHOD__);
+
+            return $this->asFailure(Craft::t('qr-payments', 'Could not create the subscription.'));
+        }
+
+        $route = QrPayments::getInstance()->getSettings()->paymentRoute;
+
+        return $this->redirect(UrlHelper::siteUrl("{$route}/{$payment->uid}/pay"));
     }
 
     /**
@@ -66,8 +109,9 @@ class SubscriptionsController extends Controller {
      */
     public function actionActivate(): Response {
         $subscription = $this->subscriptionFromRequest();
+        $userId = Craft::$app->getUser()->getIdentity()?->id;
 
-        if (!QrPayments::getInstance()->getSubscriptions()->activate($subscription)) {
+        if (!QrPayments::getInstance()->getSubscriptions()->activate($subscription, $userId)) {
             return $this->asFailure(Craft::t('qr-payments', 'Couldn’t activate subscription.'));
         }
 
@@ -78,24 +122,11 @@ class SubscriptionsController extends Controller {
      * @return Response
      * @throws BadRequestHttpException if the posted `elementId` doesn't match a real subscription
      */
-    public function actionPause(): Response {
-        $subscription = $this->subscriptionFromRequest();
-
-        if (!QrPayments::getInstance()->getSubscriptions()->pause($subscription)) {
-            return $this->asFailure(Craft::t('qr-payments', 'Couldn’t pause subscription.'));
-        }
-
-        return $this->asSuccess(Craft::t('qr-payments', 'Subscription paused.'), redirect: $subscription->getCpEditUrl());
-    }
-
-    /**
-     * @return Response
-     * @throws BadRequestHttpException if the posted `elementId` doesn't match a real subscription
-     */
     public function actionCancel(): Response {
         $subscription = $this->subscriptionFromRequest();
+        $userId = Craft::$app->getUser()->getIdentity()?->id;
 
-        if (!QrPayments::getInstance()->getSubscriptions()->cancel($subscription)) {
+        if (!QrPayments::getInstance()->getSubscriptions()->cancel($subscription, $userId)) {
             return $this->asFailure(Craft::t('qr-payments', 'Couldn’t cancel subscription.'));
         }
 

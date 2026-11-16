@@ -1,5 +1,6 @@
 {# @var paymentType \digitalastronaut\craftqrpayments\models\PaymentType #}
 {# @var isNew bool #}
+{# @var paymentStatuses array `Payment::statuses()` — populates the status selectize field on the Payment template tab's single preview. #}
 
 {% extends "qr-payments/pages/_settingsLayout.twig" %}
 
@@ -9,26 +10,25 @@
 {% set title = isNew ? "Create a new payment type"|t('qr-payments') : paymentType.name %}
 {% set selectedSettingsNavItem = 'paymentTypes' %}
 
-{# Which tab each attribute's error belongs under, so a validation error on
-   a field tucked away on a hidden tab doesn't just disappear into the
-   generic "Couldn't save" flash with no clue where to look. #}
-{% set generalTabAttributes = ['name', 'handle', 'defaultDueDateDays', 'referencePrefix', 'payTemplate'] %}
+
+{% set generalTabAttributes = ['name', 'handle', 'defaultDueDateDays', 'referencePrefix'] %}
 {% set beneficiaryTabAttributes = ['beneficiaryName', 'iban', 'bic'] %}
+{% set paymentTemplateTabAttributes = ['payTemplate'] %}
 {% set emailsTabAttributes = ['reminderRecipients', 'paymentCreatedTemplate', 'paymentStatusChangedTemplate', 'paymentsSummaryTemplate', 'paymentReminderTemplate'] %}
 
 {% set generalTabHasErrors = generalTabAttributes|filter(attribute => paymentType.hasErrors(attribute))|length > 0 %}
 {% set beneficiaryTabHasErrors = beneficiaryTabAttributes|filter(attribute => paymentType.hasErrors(attribute))|length > 0 %}
+{% set paymentTemplateTabHasErrors = paymentTemplateTabAttributes|filter(attribute => paymentType.hasErrors(attribute))|length > 0 %}
 {% set emailsTabHasErrors = emailsTabAttributes|filter(attribute => paymentType.hasErrors(attribute))|length > 0 %}
 
 {% set tabs = {
     general: { label: 'General'|t('qr-payments'), url: '#general', class: generalTabHasErrors ? 'error' : '' },
     beneficiary: { label: 'Beneficiary'|t('qr-payments'), url: '#beneficiary', class: beneficiaryTabHasErrors ? 'error' : '' },
+    paymentTemplate: { label: 'Payment template'|t('qr-payments'), url: '#paymentTemplate', class: paymentTemplateTabHasErrors ? 'error' : '' },
     emails: { label: 'Emails'|t('qr-payments'), url: '#emails', class: emailsTabHasErrors ? 'error' : '' },
 } %}
 
-{# Default to whichever tab actually has the error, instead of always
-   landing back on General, so the field with the problem is visible. #}
-{% set selectedTab = selectedTab ?? (beneficiaryTabHasErrors ? 'beneficiary' : (emailsTabHasErrors ? 'emails' : 'general')) %}
+{% set selectedTab = selectedTab ?? (beneficiaryTabHasErrors ? 'beneficiary' : (paymentTemplateTabHasErrors ? 'paymentTemplate' : (emailsTabHasErrors ? 'emails' : 'general'))) %}
 
 {% block content %}
     {{ actionInput('qr-payments/payment-types/save') }}
@@ -83,17 +83,6 @@
                 errors: paymentType.getErrors('referencePrefix'),
                 placeholder: 'PAY',
             }) }}
-
-            {{ forms.autosuggestField({
-                label: 'Pay page template'|t('qr-payments'),
-                instructions: 'Site template path to render instead of the plugin’s built-in payment page for this type. Leave blank to use the default.'|t('qr-payments'),
-                id: 'payTemplate',
-                name: 'payTemplate',
-                value: paymentType.payTemplate,
-                errors: paymentType.getErrors('payTemplate'),
-                placeholder: 'templates/components/_pay.twig',
-                suggestTemplates: true,
-            }) }}
         </div>
 
         <hr>
@@ -141,6 +130,48 @@
         </div>
     </div>
 
+    <div id="paymentTemplate" class="{{ selectedTab != 'paymentTemplate' ? 'hidden' : '' }}">
+        <div class="flex-fields" data-qrp-pay-template-field>
+            {{ forms.autosuggestField({
+                label: 'Pay page template'|t('qr-payments'),
+                instructions: 'Site template path to render instead of the plugin’s built-in payment page for this type. Leave blank to use the default.'|t('qr-payments'),
+                tip: 'Leave blank to use the plugin’s bundled default.'|t('qr-payments'),
+                id: 'payTemplate',
+                name: 'payTemplate',
+                value: paymentType.payTemplate,
+                errors: paymentType.getErrors('payTemplate'),
+                placeholder: 'templates/components/_pay.twig',
+                suggestTemplates: true,
+            }) }}
+        </div>
+
+        <hr>
+
+        {% set statusOptions = [] %}
+        {% for handle, def in paymentStatuses %}
+            {% set statusOptions = statusOptions|merge([{
+                label: def.label,
+                value: handle,
+                data: {status: def.color.value},
+            }]) %}
+        {% endfor %}
+        {% set defaultStatus = statusOptions[0].value %}
+
+        <div class="qrp-pay-preview" data-qrp-pay-preview data-preview-base-url="{{ actionUrl('qr-payments/payment-types/preview-pay-page') }}" data-status="{{ defaultStatus }}">
+            {{ forms.selectizeField({
+                label: 'Preview status'|t('qr-payments'),
+                instructions: 'Which payment status to preview the template for.'|t('qr-payments'),
+                id: 'payTemplatePreviewStatus',
+                options: statusOptions,
+                value: defaultStatus,
+            }) }}
+
+            <div class="qrp-email-preview">
+                <iframe class="qrp-email-preview-frame" data-qrp-pay-preview-frame sandbox="allow-same-origin" title="{{ 'Pay page preview'|t('qr-payments') }}" src="{{ actionUrl('qr-payments/payment-types/preview-pay-page', {status: defaultStatus}|merge(paymentType.payTemplate ? {template: paymentType.payTemplate} : {})) }}"></iframe>
+            </div>
+        </div>
+    </div>
+
     <div id="emails" class="{{ selectedTab != 'emails' ? 'hidden' : '' }}">
         <div class="flex-fields">
             {{ forms.elementSelectField({
@@ -153,56 +184,155 @@
                 sources: '*',
                 errors: paymentType.getErrors('reminderRecipients'),
             }) }}
+        </div>
 
-            <hr>
+        <hr>
 
-            {{ forms.autosuggestField({
-                label: 'Payment created email template'|t('qr-payments'),
-                instructions: 'Sent to the payer right away when a payment of this type is created, with the QR code and bank transfer details.'|t('qr-payments'),
-                tip: 'Leave blank to use the plugin’s bundled default.'|t('qr-payments'),
-                id: 'paymentCreatedTemplate',
-                name: 'paymentCreatedTemplate',
-                value: paymentType.paymentCreatedTemplate,
-                errors: paymentType.getErrors('paymentCreatedTemplate'),
+        <div class="flex-fields">
+            {% include 'qr-payments/pages/_emailPreviewField.twig' with {
+                type: paymentType,
+                actionRoute: 'qr-payments/payment-types/preview-email',
+                emailKey: 'paymentCreatedTemplate',
+                fieldLabel: 'Payment created email template'|t('qr-payments'),
+                fieldInstructions: 'Sent to the payer right away when a payment of this type is created, with the QR code and bank transfer details.'|t('qr-payments'),
                 placeholder: 'templates/emails/_paymentCreated.twig',
-                suggestTemplates: true,
-            }) }}
+            } only %}
 
-            {{ forms.autosuggestField({
-                label: 'Status changed email template'|t('qr-payments'),
-                instructions: 'Sent to the payer whenever a payment of this type’s status changes, e.g. once it’s marked paid, refunded, or cancelled.'|t('qr-payments'),
-                tip: 'Leave blank to use the plugin’s bundled default.'|t('qr-payments'),
-                id: 'paymentStatusChangedTemplate',
-                name: 'paymentStatusChangedTemplate',
-                value: paymentType.paymentStatusChangedTemplate,
-                errors: paymentType.getErrors('paymentStatusChangedTemplate'),
+            {% include 'qr-payments/pages/_emailPreviewField.twig' with {
+                type: paymentType,
+                actionRoute: 'qr-payments/payment-types/preview-email',
+                emailKey: 'paymentStatusChangedTemplate',
+                fieldLabel: 'Status changed email template'|t('qr-payments'),
+                fieldInstructions: 'Sent to the payer whenever a payment of this type’s status changes, e.g. once it’s marked paid, refunded, or cancelled.'|t('qr-payments'),
                 placeholder: 'templates/emails/_statusChanged.twig',
-                suggestTemplates: true,
-            }) }}
+            } only %}
 
-            {{ forms.autosuggestField({
-                label: 'Payments summary email template'|t('qr-payments'),
-                instructions: 'Sent to the recipients above as a digest of every payment of this type that still needs action — see the cron job note.'|t('qr-payments'),
-                tip: 'Leave blank to use the plugin’s bundled default.'|t('qr-payments'),
-                id: 'paymentsSummaryTemplate',
-                name: 'paymentsSummaryTemplate',
-                value: paymentType.paymentsSummaryTemplate,
-                errors: paymentType.getErrors('paymentsSummaryTemplate'),
+            {% include 'qr-payments/pages/_emailPreviewField.twig' with {
+                type: paymentType,
+                actionRoute: 'qr-payments/payment-types/preview-email',
+                emailKey: 'paymentsSummaryTemplate',
+                fieldLabel: 'Payments summary email template'|t('qr-payments'),
+                fieldInstructions: 'Sent to the recipients above as a digest of every payment of this type that still needs action — see the cron job note.'|t('qr-payments'),
                 placeholder: 'templates/emails/_paymentsSummary.twig',
-                suggestTemplates: true,
-            }) }}
+                previewTypeName: paymentType.name,
+            } only %}
 
-            {{ forms.autosuggestField({
-                label: 'Payment reminder email template'|t('qr-payments'),
-                instructions: 'Sent to the payer 7 days before a payment of this type is due, and again the day it becomes overdue.'|t('qr-payments'),
-                tip: 'Leave blank to use the plugin’s bundled default.'|t('qr-payments'),
-                id: 'paymentReminderTemplate',
-                name: 'paymentReminderTemplate',
-                value: paymentType.paymentReminderTemplate,
-                errors: paymentType.getErrors('paymentReminderTemplate'),
+            {% include 'qr-payments/pages/_emailPreviewField.twig' with {
+                type: paymentType,
+                actionRoute: 'qr-payments/payment-types/preview-email',
+                emailKey: 'paymentReminderTemplate',
+                fieldLabel: 'Payment reminder email template'|t('qr-payments'),
+                fieldInstructions: 'Sent to the payer 7 days before a payment of this type is due, and again the day it becomes overdue.'|t('qr-payments'),
                 placeholder: 'templates/emails/_paymentReminder.twig',
-                suggestTemplates: true,
-            }) }}
+            } only %}
         </div>
     </div>
+
+    {% js %}
+    (() => {
+        if (window.qrpPayPreviewBound) return;
+        window.qrpPayPreviewBound = true;
+
+        const debounce = (fn, wait) => {
+            let timeout;
+            return (...args) => {
+                window.clearTimeout(timeout);
+                timeout = window.setTimeout(() => fn(...args), wait);
+            };
+        };
+
+        const updatePreview = () => {
+            const preview = document.querySelector('[data-qrp-pay-preview]');
+            const templateField = document.querySelector('[data-qrp-pay-template-field]');
+            if (!preview || !templateField) return;
+
+            const frame = preview.querySelector('[data-qrp-pay-preview-frame]');
+            if (!frame) return;
+
+            const input = templateField.querySelector('.autosuggest-container input');
+            const template = input ? input.value.trim() : '';
+
+            const url = new URL(preview.dataset.previewBaseUrl, window.location.href);
+            url.searchParams.set('status', preview.dataset.status);
+            if (template) url.searchParams.set('template', template);
+            url.searchParams.set('_', Date.now());
+
+            frame.src = url.toString();
+        };
+
+        const debouncedUpdate = debounce(updatePreview, 600);
+
+        const statusSelect = document.getElementById('payTemplatePreviewStatus');
+
+        if (statusSelect && statusSelect.selectize) {
+            statusSelect.selectize.on('change', (value) => {
+                if (!value) return;
+
+                const preview = document.querySelector('[data-qrp-pay-preview]');
+                if (!preview) return;
+
+                preview.dataset.status = value;
+                updatePreview();
+            });
+        }
+
+        document.addEventListener('input', (event) => {
+            if (!event.target.closest('[data-qrp-pay-template-field]')) return;
+            if (!event.target.matches('.autosuggest-container input')) return;
+
+            debouncedUpdate();
+        });
+
+        document.addEventListener('blur', (event) => {
+            if (!event.target.closest('[data-qrp-pay-template-field]')) return;
+            if (!event.target.matches('.autosuggest-container input')) return;
+
+            updatePreview();
+        }, true);
+
+        // Grows the iframe to fit its own content instead of a fixed
+        // height, so a short status message doesn't leave dead space and
+        // a long one doesn't create a scrollbar nested inside the CP's
+        // own page scroll. Reading `contentDocument` needs
+        // `allow-same-origin` on the iframe's `sandbox` — still no
+        // `allow-scripts`, so nothing inside the preview can actually run.
+        const resizeFrame = (frame) => {
+            try {
+                const doc = frame.contentDocument;
+                const root = doc && doc.documentElement;
+                if (!root) return;
+
+                // This field's own tab starts out `hidden` (Craft's CP
+                // tabs, not this plugin's) unless it's the one selected on
+                // load, and a hidden ancestor reports 0 for every layout
+                // measurement regardless of the iframe's actual content —
+                // so a 0 here means "not measurable right now", not
+                // "empty", and is left alone rather than baked in. The
+                // tab-click listener below is what corrects it once the
+                // tab actually becomes visible.
+                const height = Math.max(root.scrollHeight, doc.body ? doc.body.scrollHeight : 0);
+                if (height > 0) frame.style.height = `${height}px`;
+            } catch {
+                // Leave the current height alone if the frame isn't readable yet.
+            }
+        };
+
+        const payFrame = document.querySelector('[data-qrp-pay-preview-frame]');
+
+        if (payFrame) {
+            payFrame.addEventListener('load', () => resizeFrame(payFrame));
+            resizeFrame(payFrame);
+
+            // Switching CP tabs doesn't reload the iframe, so nothing else
+            // would re-measure it once its tab becomes visible — wait a
+            // tick for Craft's own tab JS to finish toggling that first.
+            document.addEventListener('click', (event) => {
+                if (!event.target.closest('[role="tab"]')) return;
+
+                requestAnimationFrame(() => resizeFrame(payFrame));
+            });
+        }
+    })();
+    {% endjs %}
+
 {% endblock %}

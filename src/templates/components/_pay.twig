@@ -2,6 +2,63 @@
 {# @var qrCodeDataUri string|null #}
 
 {% set status = payment.getStatus() %}
+{% set actionable = status in ['requested', 'partial'] %}
+
+
+{% set statusCopy = {
+    'requested': {
+        badge: 'Payment requested'|t('qr-payments'),
+        heading: 'Scan to pay'|t('qr-payments'),
+        body: 'Scan the QR code below with your banking app to pay instantly.'|t('qr-payments'),
+    },
+    'partial': {
+        badge: 'Partially paid'|t('qr-payments'),
+        heading: 'Scan to pay the rest'|t('qr-payments'),
+        body: 'You’ve paid {paid} of {total} so far. Scan the QR code below to pay the remaining {remaining}.'|t('qr-payments', {
+            paid: payment.netPaidAmount|money,
+            total: payment.amount|money,
+            remaining: payment.remainingAmount|money,
+        }),
+    },
+    'reported': {
+        badge: 'Marked paid'|t('qr-payments'),
+        heading: 'Thanks we’ve been notified'|t('qr-payments'),
+        body: 'We’ve let the beneficiary know you’ve paid. This page will update automatically once it’s confirmed, so there’s nothing else for you to do.'|t('qr-payments'),
+    },
+    'paid': {
+        badge: 'Paid'|t('qr-payments'),
+        heading: 'Payment received'|t('qr-payments'),
+        body: 'Thank you — this payment has been received in full. There’s nothing left to pay.'|t('qr-payments'),
+    },
+    'overpaid': {
+        badge: 'Overpaid'|t('qr-payments'),
+        heading: 'Payment received'|t('qr-payments'),
+        body: 'You’ve paid {paid}, which is {overpaid} more than the {total} requested. The beneficiary will refund the difference.'|t('qr-payments', {
+            paid: payment.netPaidAmount|money,
+            total: payment.amount|money,
+            overpaid: payment.overpaidAmount|money,
+        }),
+    },
+    'expired': {
+        badge: 'Expired'|t('qr-payments'),
+        heading: 'Payment request expired'|t('qr-payments'),
+        body: 'This payment request expired {duration} ago and can no longer be paid through this page. Contact the beneficiary if you still need to pay.'|t('qr-payments', {
+            duration: payment.dueInLabel,
+        }),
+    },
+    'cancelled': {
+        badge: 'Cancelled'|t('qr-payments'),
+        heading: 'Payment cancelled'|t('qr-payments'),
+        body: 'This payment request was cancelled. No payment is needed.'|t('qr-payments'),
+    },
+    'refunded': {
+        badge: 'Refunded'|t('qr-payments'),
+        heading: 'Payment refunded'|t('qr-payments'),
+        body: 'The {amount} you paid was refunded in full.'|t('qr-payments', {
+            amount: payment.refundedAmount|money,
+        }),
+    },
+}[status] %}
 
 <!DOCTYPE html>
 <html lang="en">
@@ -11,19 +68,11 @@
     <title>{{ 'Pay your order'|t('qr-payments') }}</title>
 </head>
 <body class="qr-pay">
-    {% if status == 'paid' %}
-        <h1>{{ 'Payment received'|t('qr-payments') }}</h1>
-        <p>{{ 'Thank you — this payment has already been completed.'|t('qr-payments') }}</p>
-    {% elseif status in ['cancelled', 'refunded'] %}
-        <h1>{{ 'Payment no longer active'|t('qr-payments') }}</h1>
-        <p>{{ 'This payment request is no longer active.'|t('qr-payments') }}</p>
-    {% elseif status == 'expired' %}
-        <h1>{{ 'Payment expired'|t('qr-payments') }}</h1>
-        <p>{{ 'This payment request has expired.'|t('qr-payments') }}</p>
-    {% else %}
-        <h1>{{ 'Scan to pay'|t('qr-payments') }}</h1>
-        <p>{{ 'Scan the QR code below with your banking app to pay instantly.'|t('qr-payments') }}</p>
+    <span class="qr-pay__badge qr-pay__badge--{{ status }}">{{ statusCopy.badge }}</span>
+    <h1>{{ statusCopy.heading }}</h1>
+    <p>{{ statusCopy.body }}</p>
 
+    {% if actionable %}
         {% if qrCodeDataUri %}
             <img class="qr-pay__qr-code" src="{{ qrCodeDataUri }}" alt="{{ 'Payment QR code'|t('qr-payments') }}">
         {% endif %}
@@ -34,14 +83,20 @@
             <li><strong>{{ 'Beneficiary:'|t('qr-payments') }}</strong> {{ payment.beneficiaryName }}</li>
             <li><strong>{{ 'IBAN:'|t('qr-payments') }}</strong> {{ payment.iban }}</li>
             {% if payment.bic %}<li><strong>{{ 'BIC:'|t('qr-payments') }}</strong> {{ payment.bic }}</li>{% endif %}
-            <li><strong>{{ 'Amount:'|t('qr-payments') }}</strong> {{ payment.amount|money }}</li>
+            <li><strong>{{ 'Total price:'|t('qr-payments') }}</strong> {{ payment.amount|money }}</li>
+            {% if status == 'partial' %}
+                <li><strong>{{ 'Paid so far:'|t('qr-payments') }}</strong> {{ payment.netPaidAmount|money }}</li>
+                <li><strong>{{ 'Remaining:'|t('qr-payments') }}</strong> {{ payment.remainingAmount|money }}</li>
+            {% endif %}
             <li><strong>{{ 'Reference:'|t('qr-payments') }}</strong> {{ payment.remittanceReference }}</li>
-            {% if payment.dueDate %}<li><strong>{{ 'Due date:'|t('qr-payments') }}</strong> {{ payment.dueDate|date('Y-m-d') }}</li>{% endif %}
+            {# A duration ("12 days") rather than the raw `dueDate` — unlike
+               a static email, this page is rendered fresh on every visit,
+               so it can show something more immediately useful than a date
+               the payer would have to do the subtraction on themselves. #}
+            {% if payment.dueDate %}<li><strong>{{ 'Time left to pay:'|t('qr-payments') }}</strong> {{ payment.dueInLabel }}</li>{% endif %}
         </ul>
 
-        {% if status == 'reported' %}
-            <p class="qr-pay__notice">{{ 'Thanks — we’ve let the owner know you’ve paid. This page will update once it’s confirmed.'|t('qr-payments') }}</p>
-        {% elseif payment.canReportPaidByPayer() %}
+        {% if payment.canReportPaidByPayer() %}
             <form class="qr-pay__report-form" method="post" action="">
                 {{ actionInput('qr-payments/payments/report-paid') }}
                 {{ redirectInput(payment.url) }}
@@ -50,6 +105,23 @@
                 <button class="qr-pay__report-btn" type="submit">{{ 'I’ve paid'|t('qr-payments') }}</button>
             </form>
         {% endif %}
+    {% else %}
+        <ul class="qr-pay__details qr-pay__details--summary">
+            {% if status == 'overpaid' %}
+                <li><strong>{{ 'Total price:'|t('qr-payments') }}</strong> {{ payment.amount|money }}</li>
+                <li><strong>{{ 'Paid:'|t('qr-payments') }}</strong> {{ payment.grossPaidAmount|money }}</li>
+                {% if payment.refundedAmount.isPositive() %}
+                    <li><strong>{{ 'Refunded so far:'|t('qr-payments') }}</strong> {{ payment.refundedAmount|money }}</li>
+                {% endif %}
+                <li><strong>{{ 'Still to be refunded:'|t('qr-payments') }}</strong> {{ payment.overpaidAmount|money }}</li>
+            {% elseif status == 'refunded' %}
+                <li><strong>{{ 'Paid:'|t('qr-payments') }}</strong> {{ payment.grossPaidAmount|money }}</li>
+                <li><strong>{{ 'Refunded:'|t('qr-payments') }}</strong> {{ payment.refundedAmount|money }}</li>
+            {% else %}
+                <li><strong>{{ 'Amount:'|t('qr-payments') }}</strong> {{ payment.amount|money }}</li>
+            {% endif %}
+            <li><strong>{{ 'Reference:'|t('qr-payments') }}</strong> {{ payment.remittanceReference }}</li>
+        </ul>
     {% endif %}
 </body>
 </html>

@@ -37,10 +37,11 @@ class PaymentsService extends Component {
      * @param DateTime|null $dueDate
      * @param int|null $subscriptionId The subscription this payment was stamped out by, when called from `SubscriptionsService::advance()`. Null for a one-off payment.
      * @param int|null $userId The Craft user this payment is linked to, when the payer has an account. Null for a guest payment.
+     * @param DateTime|null $dateCreated Backdates the element's own `dateCreated` — only honored by Craft on a brand-new element's first save, and only used by `SeedController` so fixture data doesn't all read as created at this exact instant. Left `null` for every real caller, which leaves it at the normal "now".
      * @return Payment
      * @throws Exception if the payment fails validation on save (including a bad beneficiary/IBAN/BIC EPC payload — see `Payment::generateQrCode()`)
      */
-    public function createPayment(PaymentType $type, float $amount, string $email, ?DateTime $dueDate = null, ?int $subscriptionId = null, ?int $userId = null): Payment {
+    public function createPayment(PaymentType $type, float $amount, string $email, ?DateTime $dueDate = null, ?int $subscriptionId = null, ?int $userId = null, ?DateTime $dateCreated = null): Payment {
         $payment = new Payment();
         $payment->typeId = $type->id;
         $payment->subscriptionId = $subscriptionId;
@@ -49,6 +50,7 @@ class PaymentsService extends Component {
         $payment->amount = $amount;
 
         if ($dueDate !== null) $payment->dueDate = $dueDate;
+        if ($dateCreated !== null) $payment->dateCreated = $dateCreated;
 
         // Only pull custom field values from an actual form submission —
         // a console/queue-triggered call (e.g. SubscriptionsService::advance())

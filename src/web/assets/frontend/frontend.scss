@@ -1,30 +1,122 @@
+// Same plain, neutral palette and card treatment as the plugin's bundled
+// default emails (`templates/emails/_layout.twig` and friends) — this is
+// the only built-in front-end page the plugin ships, so it should read
+// as part of the same family rather than its own, separately-designed
+// look.
+html {
+	background-color: #f3f4f6;
+}
+
 .qr-pay {
-	font-family: Helvetica, Arial, sans-serif;
-	max-width: 480px;
+	box-sizing: border-box;
+	width: calc(100% - 32px);
+	max-width: 600px;
 	margin: 48px auto;
-	padding: 0 16px;
-	color: #222;
+	padding: 32px;
+	background-color: #ffffff;
+	border: 1px solid #e5e7eb;
+	border-top: 4px solid #111827;
+	border-radius: 8px;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+	font-size: 15px;
+	line-height: 1.6;
+	color: #374151;
+}
+
+.qr-pay h1 {
+	margin: 0 0 16px 0;
+	font-size: 21px;
+	line-height: 1.3;
+	font-weight: 700;
+	color: #111827;
+}
+
+.qr-pay p {
+	margin: 0 0 16px 0;
+}
+
+.qr-pay__badge {
+	display: inline-block;
+	margin-bottom: 12px;
+	padding: 4px 10px;
+	border-radius: 999px;
+	font-size: 12px;
+	font-weight: 700;
+	letter-spacing: 0.02em;
+	text-transform: uppercase;
+
+	&--requested {
+		background-color: #ffedd5;
+		color: #9a3412;
+	}
+
+	&--partial {
+		background-color: #dbeafe;
+		color: #1e40af;
+	}
+
+	&--reported {
+		background-color: #cffafe;
+		color: #155e75;
+	}
+
+	&--paid {
+		background-color: #d1fae5;
+		color: #065f46;
+	}
+
+	&--overpaid,
+	&--expired {
+		background-color: #fee2e2;
+		color: #991b1b;
+	}
+
+	&--cancelled {
+		background-color: #f3f4f6;
+		color: #4b5563;
+	}
+
+	&--refunded {
+		background-color: #ede9fe;
+		color: #5b21b6;
+	}
 }
 
 .qr-pay__qr-code {
 	display: block;
-	max-width: 240px;
-	margin: 24px 0;
+	width: 180px;
+	max-width: 100%;
+	margin: 0 auto 20px;
 }
 
 .qr-pay__details {
-	padding-left: 0;
+	margin: 20px 0;
+	padding: 4px 16px;
 	list-style: none;
+	background-color: #f9fafb;
+	border: 1px solid #e5e7eb;
+	border-radius: 6px;
 
 	li {
-		margin-bottom: 8px;
+		display: flex;
+		justify-content: space-between;
+		gap: 16px;
+		padding: 12px 0;
+		font-size: 14px;
 	}
-}
 
-.qr-pay__notice {
-	padding: 12px 16px;
-	background: #eef6f6;
-	border-radius: 4px;
+	li + li {
+		border-top: 1px solid #e5e7eb;
+	}
+
+	strong {
+		font-weight: 400;
+		color: #6b7280;
+	}
+
+	&--summary {
+		margin-top: 20px;
+	}
 }
 
 .qr-pay__report-form {
@@ -32,11 +124,13 @@
 }
 
 .qr-pay__report-btn {
-	padding: 10px 20px;
+	display: inline-block;
+	padding: 12px 28px;
 	border: none;
-	border-radius: 4px;
-	background: #222;
-	color: #fff;
-	font-size: 1em;
+	border-radius: 6px;
+	background-color: #111827;
+	color: #ffffff;
+	font-size: 14px;
+	font-weight: 600;
 	cursor: pointer;
 }

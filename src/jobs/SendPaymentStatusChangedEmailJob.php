@@ -29,6 +29,9 @@ class SendPaymentStatusChangedEmailJob extends SendTemplatedEmailJob {
     public int $paymentId;
     public string $previousStatus;
 
+    /** The `statusHistory` entry that caused this status change — see `EmailLogService`. */
+    public ?string $historyEntryId = null;
+
     private ?Payment $payment = null;
 
     /**
@@ -40,7 +43,14 @@ class SendPaymentStatusChangedEmailJob extends SendTemplatedEmailJob {
      * @return string[]
      */
     public function __sleep(): array {
-        return ['paymentId', 'previousStatus'];
+        return ['paymentId', 'previousStatus', 'historyEntryId', 'triggeredByUserId'];
+    }
+
+    /**
+     * @return array
+     */
+    protected function getLogContext(): array {
+        return ['paymentId' => $this->paymentId, 'historyEntryId' => $this->historyEntryId];
     }
 
     /**

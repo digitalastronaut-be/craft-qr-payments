@@ -6,11 +6,11 @@ A payment's status is never set directly — it's always computed from its **sta
 
 | Status | Meaning |
 | --- | --- |
-| Pending | Created, nothing paid yet, due date not passed. |
+| Requested | Created, nothing paid yet, due date not passed. |
 | Partially paid | Something's been paid, but less than the full amount. |
 | Paid | The full amount has been paid. |
 | Overpaid | More than the full amount has been paid. |
-| Expired | Still pending once its due date has passed. |
+| Expired | Still requested once its due date has passed. |
 | Cancelled | Manually cancelled. Sticks regardless of anything paid before or after — see below. |
 | Refunded | Nothing currently paid, but a refund is on record (so it was paid at some point). |
 
@@ -24,9 +24,9 @@ A payment's edit page (and each row in [Processing payments](/plugin/processing-
 - **Cancel** — cancels the payment. Once cancelled, only Refund remains available (in case something had already been paid) — Cancelled is final and doesn't change with later payment/refund entries.
 
 <!-- ![The action buttons on a payment's edit page, and its status history table below them showing a payment, a status pill, an amount and a note](../public/images/payment-status-history.png) -->
-_Screenshot: a payment's edit screen sidebar with the action buttons, and the status history table underneath showing a couple of entries (type, date, updated by, amount, note)._
+_Screenshot: a payment's edit screen sidebar with the action buttons, and the status history table underneath showing a couple of entries (status, date, updated by, amount, note)._
 
-Every recorded entry shows up in the status history table with its type, date, who recorded it, the amount, and an optional note.
+Every recorded entry shows up in the status history table with its status, date, who recorded it, the amount, and an optional note.
 
 ## Reconciling payments one at a time
 

@@ -40,12 +40,24 @@ class RecentPayments extends Widget {
     public const string SORT_AMOUNT_DESC = 'amountDesc';
     public const string SORT_AMOUNT_ASC = 'amountAsc';
 
+    /**
+     * One entry per `Color` case any `Payment::statuses()` definition
+     * actually uses, so every status's bar/line always resolves to its
+     * own real color below instead of silently falling back to
+     * `'gray'` for whichever one is missing — `paid` (`Color::Green`)
+     * did exactly that until `green` was added here, which is why it's
+     * always rendered as the single biggest dataset but the chart never
+     * showed a green anything.
+     */
     private const array CHART_COLORS = [
         'orange' => '251, 146, 60',
         'teal' => '17, 166, 151',
         'red' => '220, 38, 38',
         'gray' => '154, 165, 177',
         'purple' => '168, 85, 247',
+        'cyan' => '6, 182, 212',
+        'blue' => '59, 130, 246',
+        'green' => '34, 197, 94',
     ];
 
     public array|string $statuses = [];

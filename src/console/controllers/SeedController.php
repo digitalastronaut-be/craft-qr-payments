@@ -14,6 +14,7 @@ namespace digitalastronaut\craftqrpayments\console\controllers;
 use Craft;
 use craft\elements\User;
 use craft\helpers\DateTimeHelper;
+use craft\helpers\MoneyHelper;
 
 use digitalastronaut\craftqrpayments\elements\Payment;
 use digitalastronaut\craftqrpayments\elements\Subscription;
@@ -21,6 +22,7 @@ use digitalastronaut\craftqrpayments\models\PaymentType;
 use digitalastronaut\craftqrpayments\models\SubscriptionType;
 use digitalastronaut\craftqrpayments\QrPayments;
 
+use DateTime;
 use InvalidArgumentException;
 use yii\console\Controller;
 use yii\console\ExitCode;
@@ -129,9 +131,10 @@ class SeedController extends Controller {
     ];
 
     /**
-     * Rough day-length used only to pick a believable `startedAt` below —
-     * not the real cadence math (`SubscriptionsService::nextDueDateAfter()`
-     * uses Carbon's calendar-aware `addMonthNoOverflow()`/etc. for that).
+     * Rough day-length used only to pick believable `startedAt`/`dueDate`
+     * values below — not the real cadence math (`SubscriptionType::
+     * addInterval()` uses Carbon's calendar-aware `addMonthNoOverflow()`/
+     * etc. for that).
      *
      * @var array<string, int>
      */
@@ -175,7 +178,7 @@ class SeedController extends Controller {
      * @var string[]
      */
     private const array STANDALONE_OUTCOMES = [
-        'pending', 'expired', 'awaiting_confirmation', 'partial', 'paid', 'overpaid', 'cancelled', 'refunded',
+        'requested', 'expired', 'awaiting_confirmation', 'partial', 'paid', 'overpaid', 'cancelled', 'refunded',
     ];
 
     /**
@@ -306,6 +309,16 @@ class SeedController extends Controller {
     }
 
     /**
+     * Stamps each cycle's `Payment` directly (explicit, staggered
+     * `dueDate`s) rather than through `SubscriptionsService::advance()`:
+     * that now derives each payment's due date from the *previous* one
+     * actually being paid (see `Subscription::getCoverageEnd()`), so
+     * calling it in a loop before any of them are paid would just stamp
+     * every cycle due "now." Seed data wants the full backlog — paid and
+     * not — up front, which the real advancing flow deliberately
+     * refuses to build on its own (never more than one outstanding
+     * unpaid payment at a time).
+     *
      * @param array<string, SubscriptionType> $subscriptionTypes Handle => type, from `seedSubscriptionTypes()`.
      * @param int|null $userId Attributed as the "operator" on every simulated payment entry.
      * @return int Total number of payments created across every subscriber.
@@ -314,34 +327,89 @@ class SeedController extends Controller {
         $paymentCount = 0;
 
         // The last cycle's due date lands on `$referenceNow`, not the real
-        // "now" — a day's buffer so the still-pending payment it leaves
+        // "now" — a day's buffer so the still-requested payment it leaves
         // behind reads as comfortably upcoming regardless of what time of
         // day this command happens to run, rather than flickering between
-        // "pending" and "expired" (`Payment::getStatus()` compares against
+        // "requested" and "expired" (`Payment::getStatus()` compares against
         // the real current moment) depending on the clock.
         $referenceNow = DateTimeHelper::currentUTCDateTime()->modify('+1 day');
 
+        // How many cycle payments every subscriber below will end up
+        // creating, combined — needed up front so `backdatedDate()` can
+        // spread every one of them evenly across the whole run instead of
+        // just within each subscriber's own cycles. Per-subscriber
+        // interpolation (between that subscriber's own backdated creation
+        // date and "now") was tried first and still skewed heavily toward
+        // "now": cycle count (1-12) is picked independently of how
+        // recently a subscriber was "created", so a late-index (recently
+        // "created") subscriber with a high cycle count would cram all of
+        // them into whatever tiny window existed between its own recent
+        // creation and "now" — compounding with every other recent
+        // subscriber doing the same.
+        $totalSubscriptionPayments = 0;
+        for ($index = 0; $index < $this->subscriptions; $index++) {
+            $totalSubscriptionPayments += $this->generatedSubscriber($index, $subscriptionTypes)['cycles'];
+        }
+
+        $paymentDateIndex = 0;
+
         for ($index = 0; $index < $this->subscriptions; $index++) {
             $spec = $this->generatedSubscriber($index, $subscriptionTypes);
+            $type = $subscriptionTypes[$spec['subscriptionType']];
 
-            $intervalDays = self::INTERVAL_DAYS[$subscriptionTypes[$spec['subscriptionType']]->interval];
+            $intervalDays = self::INTERVAL_DAYS[$type->interval];
             $startedAt = (clone $referenceNow)->modify('-' . ($intervalDays * ($spec['cycles'] - 1)) . ' days');
+
+            // Backdated so 120+ subscribers don't all read as having signed
+            // up in the same instant — see `backdatedDate()`. Unrelated to
+            // `$startedAt` above, which only staggers `dueDate`s.
+            $subscriptionCreatedAt = $this->backdatedDate($index, $this->subscriptions);
 
             $subscription = new Subscription([
                 'email' => $spec['email'],
-                'subscriptionTypeId' => $subscriptionTypes[$spec['subscriptionType']]->id,
-                'startedAt' => $startedAt,
-                'nextDueDate' => $startedAt,
+                'subscriptionTypeId' => $type->id,
+                // `Subscription::$status` now defaults to `requested` —
+                // this command still wants every non-cancelled subscriber
+                // to start out `active` (an already-established subscriber
+                // is the common fixture case), so set it explicitly rather
+                // than inherit that default.
+                'status' => Subscription::STATUS_ACTIVE,
+                // Only honored by Craft on a brand-new element's first
+                // save — see `PaymentsService::createPayment()`'s own
+                // `$dateCreated` param for the equivalent on `Payment`.
+                'dateCreated' => $subscriptionCreatedAt,
             ]);
 
             if (!Craft::$app->getElements()->saveElement($subscription)) {
                 throw new InvalidArgumentException("Failed to save subscription for \"{$spec['email']}\": " . json_encode($subscription->getErrors()));
             }
 
+            // `Subscription::afterSave()` already auto-created a first
+            // payment (`SubscriptionsService::ensureFirstPayment()`) — this
+            // command stamps out its own fully staggered backlog below
+            // instead, so discard that one rather than ending up with an
+            // extra, un-staggered payment on top of it.
+            if ($autoPayment = $subscription->getLatestPayment()) {
+                Craft::$app->getElements()->deleteElement($autoPayment, true);
+            }
+
             $payments = [];
 
             for ($i = 0; $i < $spec['cycles']; $i++) {
-                $payments[] = QrPayments::getInstance()->getSubscriptions()->advance($subscription);
+                $dueDate = (clone $startedAt)->modify('+' . ($intervalDays * $i) . ' days');
+
+                $payments[] = QrPayments::getInstance()->getPayments()->createPayment(
+                    type: $type->getPaymentType(),
+                    amount: (float) MoneyHelper::toDecimal($type->getAmount()),
+                    email: $spec['email'],
+                    dueDate: $dueDate,
+                    subscriptionId: $subscription->id,
+                    // Every cycle payment across every subscriber shares
+                    // this one running index/total, not just this
+                    // subscriber's own — see `$totalSubscriptionPayments`
+                    // above for why.
+                    dateCreated: $this->backdatedDate($paymentDateIndex++, $totalSubscriptionPayments),
+                );
             }
 
             foreach (array_slice($payments, 0, $spec['paidCount']) as $payment) {
@@ -350,9 +418,7 @@ class SeedController extends Controller {
 
             $paymentCount += count($payments);
 
-            if ($spec['finalStatus'] === Subscription::STATUS_PAUSED) {
-                QrPayments::getInstance()->getSubscriptions()->pause($subscription);
-            } elseif ($spec['finalStatus'] === Subscription::STATUS_CANCELLED) {
+            if ($spec['finalStatus'] === Subscription::STATUS_CANCELLED) {
                 QrPayments::getInstance()->getSubscriptions()->cancel($subscription);
             }
 
@@ -378,6 +444,9 @@ class SeedController extends Controller {
                 amount: $spec['amount'],
                 email: $spec['email'],
                 dueDate: $dueDate,
+                // Backdated so 200+ standalone payments don't all read as
+                // requested in the same instant — see `backdatedDate()`.
+                dateCreated: $this->backdatedDate($index, $this->standalonePayments),
             );
 
             $this->applyOutcome($payment, $spec['outcome'], $userId, $spec['paidAmount']);
@@ -391,9 +460,9 @@ class SeedController extends Controller {
     /**
      * `$index` picks the subscription type (round-robin), how many payment
      * cycles to stamp out (1-12, via `SubscriptionsService::advance()`),
-     * how many of those come out paid (the rest stay pending), and the
-     * final status (90% active, 5% paused, 5% cancelled) — deterministically,
-     * so the same `$index` always produces the same subscriber, whatever
+     * how many of those come out paid (the rest stay requested), and the
+     * final status (95% active, 5% cancelled) — deterministically, so the
+     * same `$index` always produces the same subscriber, whatever
      * `$subscriptions` is set to.
      *
      * @param int $index
@@ -414,7 +483,6 @@ class SeedController extends Controller {
             'paidCount' => max(0, $cycles - 1 - ($index % 2)),
             'finalStatus' => match ($index % 20) {
                 0 => Subscription::STATUS_CANCELLED,
-                1 => Subscription::STATUS_PAUSED,
                 default => Subscription::STATUS_ACTIVE,
             },
         ];
@@ -476,6 +544,27 @@ class SeedController extends Controller {
     }
 
     /**
+     * Deterministically spreads `$total` indexed items across the last 365
+     * days — index `0` lands a full year back, the last index lands today
+     * — so a big seeded batch reads as having accumulated over time rather
+     * than every row sharing the exact instant this command happened to
+     * run. Only ever moves a date *backward* from "now"; callers that
+     * derive further dates off the result (e.g. `seedSubscriptions()`
+     * staggering each cycle payment forward from its subscription's own
+     * backdated creation date) are responsible for not pushing back past
+     * the real "now" themselves.
+     *
+     * @param int $index
+     * @param int $total
+     * @return DateTime
+     */
+    private function backdatedDate(int $index, int $total): DateTime {
+        $daysAgo = (int) round(365 * (1 - $index / max($total - 1, 1)));
+
+        return DateTimeHelper::currentUTCDateTime()->modify("-{$daysAgo} days");
+    }
+
+    /**
      * Prints a running count every 10 items (plus the very last one) rather
      * than one line per item — with `$subscriptions`/`$standalonePayments`
      * in the hundreds, a line each would mostly just be noise.
@@ -495,20 +584,20 @@ class SeedController extends Controller {
      * (run again in `beforeSave()` on the resave below) land on the given
      * outcome, then resaves — same mechanism the CP's "Mark as paid"/"Add
      * payment"/"Refund"/"Cancel" buttons use, just without the HTTP round
-     * trip. `pending` and `expired` need no history at all: a brand-new
-     * payment is already `pending`, and `expired` is purely a function of
+     * trip. `requested` and `expired` need no history at all: a brand-new
+     * payment is already `requested`, and `expired` is purely a function of
      * `dueDate` having passed (see `Payment::getStatus()`), so there's
      * nothing to resave for either.
      *
      * @param Payment $payment
-     * @param string $outcome One of 'pending', 'expired', 'paid', 'partial', 'overpaid', 'awaiting_confirmation', 'cancelled', 'refunded'.
+     * @param string $outcome One of 'requested', 'expired', 'paid', 'partial', 'overpaid', 'awaiting_confirmation', 'cancelled', 'refunded'.
      * @param int|null $userId
      * @param float|null $paidAmount Required for 'partial'/'overpaid' — how much was actually paid.
      * @return void
      */
     private function applyOutcome(Payment $payment, string $outcome, ?int $userId, ?float $paidAmount = null): void {
         match ($outcome) {
-            'pending', 'expired' => null,
+            'requested', 'expired' => null,
             'paid' => $payment->pushStatusHistoryEntry(Payment::HISTORY_TYPE_PAYMENT, $payment->getAmount(), $userId),
             'partial', 'overpaid' => $payment->pushStatusHistoryEntry(Payment::HISTORY_TYPE_PAYMENT, Payment::parseMoney($paidAmount), $userId),
             'awaiting_confirmation' => $payment->pushStatusHistoryEntry(Payment::HISTORY_TYPE_PAYER_REPORTED, null, null),
@@ -517,7 +606,7 @@ class SeedController extends Controller {
             default => throw new InvalidArgumentException("Unknown seed outcome: {$outcome}"),
         };
 
-        if (!\in_array($outcome, ['pending', 'expired'], true)) {
+        if (!\in_array($outcome, ['requested', 'expired'], true)) {
             if (!Craft::$app->getElements()->saveElement($payment)) {
                 throw new InvalidArgumentException("Failed to apply outcome \"{$outcome}\" to payment #{$payment->id}: " . json_encode($payment->getErrors()));
             }
@@ -528,7 +617,7 @@ class SeedController extends Controller {
      * A refund only makes sense against a payment that was first actually
      * paid in full, so this pushes both entries — the second nets the
      * balance back to zero, which is what `computeStatus()` keys off to
-     * land on `STATUS_REFUNDED` instead of back on `STATUS_PENDING`.
+     * land on `STATUS_REFUNDED` instead of back on `STATUS_REQUESTED`.
      *
      * @param Payment $payment
      * @param int|null $userId
