@@ -81,6 +81,7 @@ class PaymentTypesController extends Controller {
             'isNew' => $paymentType->id === null,
             'reminderRecipientUsers' => $paymentType->reminderRecipients ? User::find()->id($paymentType->reminderRecipients)->status(null)->all() : [],
             'paymentStatuses' => Payment::statuses(),
+            'userGroups' => Craft::$app->getUserGroups()->getAllGroups(),
         ]);
     }
 
@@ -164,6 +165,7 @@ class PaymentTypesController extends Controller {
 
         $paymentType->name = $this->request->getRequiredBodyParam('name');
         $paymentType->handle = $this->request->getRequiredBodyParam('handle');
+        $paymentType->amount = $this->request->getBodyParam('amount');
         $paymentType->defaultDueDateDays = $this->request->getBodyParam('defaultDueDateDays') ?: null;
         $paymentType->beneficiaryName = $this->request->getBodyParam('beneficiaryName', '');
         $paymentType->iban = $this->request->getBodyParam('iban', '');
@@ -175,16 +177,16 @@ class PaymentTypesController extends Controller {
         $paymentType->paymentsSummaryTemplate = $this->request->getBodyParam('paymentsSummaryTemplate', '');
         $paymentType->paymentReminderTemplate = $this->request->getBodyParam('paymentReminderTemplate', '');
 
-        // `_includes/forms/elementSelect.twig` always posts a plain-string
-        // placeholder when nothing's selected, so "nothing selected" can be
-        // told apart from "field not submitted" — normalize that here
-        // before it hits the typed `array` property (same quirk `Settings`
-        // handles via a `setAttributes()` override; inlined here instead
-        // since this controller already sets every attribute individually).
         $reminderRecipients = $this->request->getBodyParam('reminderRecipients', []);
         $paymentType->reminderRecipients = is_array($reminderRecipients)
             ? $reminderRecipients
             : ($reminderRecipients === '' ? [] : (array) $reminderRecipients);
+
+        // Same `checkboxSelectField` "nothing checked" quirk as above.
+        $requestableBy = $this->request->getBodyParam('requestableBy', []);
+        $paymentType->requestableBy = is_array($requestableBy)
+            ? $requestableBy
+            : ($requestableBy === '' ? [] : (array) $requestableBy);
 
         $fieldLayout = Craft::$app->getFields()->assembleLayoutFromPost();
         $fieldLayout->type = Payment::class;
@@ -224,12 +226,9 @@ class PaymentTypesController extends Controller {
         }
 
         if (!$paymentTypes->deletePaymentType($paymentType)) {
-            // Craft.VueAdminTable's delete button only shows the fail
-            // message (and skips the success notice + table reload) when
-            // the request actually rejects — a 200 response with a
-            // `success: false` body still resolves, so this must set a
-            // non-2xx status via asFailure(), not a plain asJson() array.
-            return $this->asFailure(Craft::t('qr-payments', 'Couldn’t delete “{name}” — it’s either the only remaining payment type, or payments still use it.', [
+            return $this->asFailure(Craft::t(
+                'qr-payments', 
+                'Couldn’t delete “{name}” — it’s either the only remaining payment type, or payments still use it.', [
                 'name' => $paymentType->name,
             ]));
         }

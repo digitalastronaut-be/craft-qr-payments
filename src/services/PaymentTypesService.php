@@ -15,7 +15,10 @@ use Craft;
 use craft\base\Component;
 use craft\db\Query;
 use craft\helpers\Json;
+use craft\helpers\MoneyHelper;
 use craft\helpers\StringHelper;
+
+use craft\elements\User;
 
 use digitalastronaut\craftqrpayments\helpers\Table;
 use digitalastronaut\craftqrpayments\models\PaymentType;
@@ -46,6 +49,10 @@ class PaymentTypesService extends Component {
             // Payment::$statusHistory handles via its own setter.
             $row['reminderRecipients'] = $row['reminderRecipients'] !== null
                 ? (Json::decode($row['reminderRecipients']) ?: [])
+                : [];
+
+            $row['requestableBy'] = $row['requestableBy'] !== null
+                ? (Json::decode($row['requestableBy']) ?: [])
                 : [];
 
             return new PaymentType($row);
@@ -98,6 +105,20 @@ class PaymentTypesService extends Component {
     }
 
     /**
+     * The generic replacement for a site's own "which type applies to
+     * this user" lookup — filters every type by `isRequestableBy()`.
+     *
+     * @param User|null $user
+     * @return PaymentType[]
+     */
+    public function getRequestableTypesFor(?User $user): array {
+        return array_values(array_filter(
+            $this->getAllPaymentTypes(),
+            static fn(PaymentType $type) => $type->isRequestableBy($user),
+        ));
+    }
+
+    /**
      * @param PaymentType $paymentType
      * @param bool $runValidation
      * @return bool False if validation failed.
@@ -117,6 +138,8 @@ class PaymentTypesService extends Component {
         $attributes = [
             'name' => $paymentType->name,
             'handle' => $paymentType->handle,
+            'amount' => MoneyHelper::toDecimal($paymentType->getAmount()) ?: null,
+            'requestableBy' => $paymentType->requestableBy,
             'fieldLayoutId' => $paymentType->fieldLayoutId,
             'defaultDueDateDays' => $paymentType->defaultDueDateDays,
             'beneficiaryName' => $paymentType->beneficiaryName,
@@ -192,7 +215,7 @@ class PaymentTypesService extends Component {
      */
     private function createPaymentTypeQuery(): Query {
         return (new Query())
-            ->select(['id', 'uid', 'name', 'handle', 'fieldLayoutId', 'defaultDueDateDays', 'beneficiaryName', 'iban', 'bic', 'referencePrefix', 'payTemplate', 'paymentCreatedTemplate', 'paymentStatusChangedTemplate', 'reminderRecipients', 'paymentsSummaryTemplate', 'paymentReminderTemplate'])
+            ->select(['id', 'uid', 'name', 'handle', 'amount', 'requestableBy', 'fieldLayoutId', 'defaultDueDateDays', 'beneficiaryName', 'iban', 'bic', 'referencePrefix', 'payTemplate', 'paymentCreatedTemplate', 'paymentStatusChangedTemplate', 'reminderRecipients', 'paymentsSummaryTemplate', 'paymentReminderTemplate'])
             ->from(Table::QR_PAYMENTS_PAYMENTTYPES)
             ->orderBy(['name' => SORT_ASC]);
     }

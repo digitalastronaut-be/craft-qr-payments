@@ -16,6 +16,7 @@ use craft\base\Chippable;
 use craft\base\CpEditable;
 use craft\base\Model;
 use craft\db\Query;
+use craft\elements\User;
 use craft\helpers\UrlHelper;
 use craft\web\View;
 
@@ -69,6 +70,15 @@ class SubscriptionType extends Model implements Chippable, CpEditable {
     private ?Money $_amount = null;
 
     public string $interval = self::INTERVAL_MONTHLY;
+
+    /**
+     * @var string[] Who's allowed to request a `Subscription` of this
+     * type through `SubscriptionsController::actionRequest()` — each
+     * entry is either the literal `"guest"`, or a user group's `uid`.
+     * Empty means unrestricted (anyone, including a guest) — see
+     * `isRequestableBy()`.
+     */
+    public array $requestableBy = [];
 
     /**
      * @var string Site template path rendered instead of the plugin's
@@ -165,6 +175,23 @@ class SubscriptionType extends Model implements Chippable, CpEditable {
     }
 
     /**
+     * Whether `$user` (or a guest, when null) is allowed to request a
+     * `Subscription` of this type through `SubscriptionsController::
+     * actionRequest()`.
+     *
+     * @param User|null $user
+     * @return bool
+     */
+    public function isRequestableBy(?User $user): bool {
+        if (empty($this->requestableBy)) return true;
+        if ($user === null) return \in_array('guest', $this->requestableBy, true);
+
+        $groupUids = array_map(static fn($group) => $group->uid, $user->getGroups());
+
+        return (bool) array_intersect($this->requestableBy, $groupUids);
+    }
+
+    /**
      * @inheritdoc
      */
     public static function get(string|int $id): ?static {
@@ -214,9 +241,26 @@ class SubscriptionType extends Model implements Chippable, CpEditable {
             [['amount'], 'validateAmount'],
             [['interval'], 'in', 'range' => array_keys(self::intervals())],
 
+            [['requestableBy'], 'validateRequestableBy'],
+
             [['subscriptionRequestedTemplate', 'subscriptionCancelledTemplate', 'subscriptionExpiredTemplate', 'subscriptionActivatedTemplate', 'subscriptionExpiringTemplate'], 'string'],
             [['subscriptionRequestedTemplate', 'subscriptionCancelledTemplate', 'subscriptionExpiredTemplate', 'subscriptionActivatedTemplate', 'subscriptionExpiringTemplate'], 'validateTemplateExists'],
         ]);
+    }
+
+    /**
+     * @param string $attribute
+     * @return void
+     */
+    public function validateRequestableBy(string $attribute): void {
+        foreach ($this->$attribute as $value) {
+            if ($value === 'guest') continue;
+
+            if (Craft::$app->getUserGroups()->getGroupByUid($value) === null) {
+                $this->addError($attribute, Craft::t('qr-payments', 'One or more selected groups could not be found.'));
+                return;
+            }
+        }
     }
 
     /**

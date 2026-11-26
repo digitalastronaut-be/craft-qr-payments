@@ -151,35 +151,12 @@ class EmailPreviewService extends Component {
 
     /**
      * @param string $status One of `Payment::STATUS_*` — see `Payment::statuses()`.
-     * @param string|null $template Site template path to render instead of the plugin's bundled pay page (`qr-payments/components/_pay`); null renders the bundled default.
+     * @param string|null $template Site template path to render instead of the plugin's bundled pay page (`qr-payments/components/_pay`); null renders the bundled default. The bundled default's own stylesheet is only injected when this is null, so a custom template keeps its own page styling.
      * @return string Rendered HTML, or a friendly inline notice if `$template` doesn't exist (e.g. a path still being typed in).
      * @throws Throwable if the template fails to render.
      */
     public function renderPayPagePreview(string $status, ?string $template = null): string {
         $view = Craft::$app->getView();
-
-        // Snapshotting `cssFiles` before/after these two calls, rather
-        // than letting `renderPageTemplate()` auto-inject everything
-        // currently registered on this request's *shared* View, the way
-        // `Controller::renderTemplate()`'s response formatter does for
-        // the real pay page. Inside an authenticated CP request that
-        // view already carries the CP's own cp.css/admin.css/Tailwind
-        // reset/etc. from the rest of the page — flushing all of that
-        // into this iframe clobbers `.qr-pay`'s plain, site-styled look
-        // with the CP's own theme instead of just linking our one
-        // stylesheet. Diffing lets us inject only what these two calls
-        // themselves just registered.
-        $cssFilesBefore = $view->cssFiles;
-
-        $view->registerAssetBundle(FrontendAssetBundle::class);
-        QrPayments::getInstance()->getVite()->register('src/web/assets/frontend/frontend.js');
-
-        $newCssFiles = array_diff_key($view->cssFiles, $cssFilesBefore);
-
-        // Roll back immediately: this preview shouldn't leave its own
-        // registrations sitting on the shared View for whatever else
-        // renders later in the same CP request.
-        $view->cssFiles = $cssFilesBefore;
 
         $mode = View::TEMPLATE_MODE_CP;
         $templatePath = 'qr-payments/components/_pay';
@@ -191,6 +168,38 @@ class EmailPreviewService extends Component {
 
             $templatePath = $template;
             $mode = View::TEMPLATE_MODE_SITE;
+        }
+
+        // Only the plugin's own bundled template wants this bundle's
+        // `html { background-color }` and card styling — a custom
+        // `payTemplate` has its own site layout/look, and injecting this
+        // on top of it would paint over whatever that template's own
+        // page background is meant to be.
+        $newCssFiles = [];
+
+        if ($template === null) {
+            // Snapshotting `cssFiles` before/after these two calls, rather
+            // than letting `renderPageTemplate()` auto-inject everything
+            // currently registered on this request's *shared* View, the way
+            // `Controller::renderTemplate()`'s response formatter does for
+            // the real pay page. Inside an authenticated CP request that
+            // view already carries the CP's own cp.css/admin.css/Tailwind
+            // reset/etc. from the rest of the page — flushing all of that
+            // into this iframe clobbers `.qr-pay`'s plain, site-styled look
+            // with the CP's own theme instead of just linking our one
+            // stylesheet. Diffing lets us inject only what these two calls
+            // themselves just registered.
+            $cssFilesBefore = $view->cssFiles;
+
+            $view->registerAssetBundle(FrontendAssetBundle::class);
+            QrPayments::getInstance()->getVite()->register('src/web/assets/frontend/frontend.js');
+
+            $newCssFiles = array_diff_key($view->cssFiles, $cssFilesBefore);
+
+            // Roll back immediately: this preview shouldn't leave its own
+            // registrations sitting on the shared View for whatever else
+            // renders later in the same CP request.
+            $view->cssFiles = $cssFilesBefore;
         }
 
         $payment = $this->buildFakePaymentForStatus($status);

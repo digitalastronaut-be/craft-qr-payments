@@ -13,7 +13,7 @@
 {# Which tab each attribute's error belongs under, so a validation error
    on a field tucked away on a hidden tab doesn't just disappear into the
    generic "Couldn't save" flash with no clue where to look. #}
-{% set generalTabAttributes = ['name', 'handle', 'paymentTypeId', 'interval', 'amount'] %}
+{% set generalTabAttributes = ['name', 'handle', 'paymentTypeId', 'interval', 'amount', 'requestableBy'] %}
 {% set emailsTabAttributes = ['subscriptionRequestedTemplate', 'subscriptionCancelledTemplate', 'subscriptionExpiredTemplate', 'subscriptionActivatedTemplate', 'subscriptionExpiringTemplate'] %}
 
 {% set generalTabHasErrors = generalTabAttributes|filter(attribute => subscriptionType.hasErrors(attribute))|length > 0 %}
@@ -100,6 +100,18 @@
                 value: subscriptionType.getAmount() ? subscriptionType.getAmount().getAmount() / 100 : null,
                 errors: subscriptionType.getErrors('amount'),
                 required: true,
+            }) }}
+
+            {{ forms.checkboxSelectField({
+                label: 'Who can request this'|t('qr-payments'),
+                instructions: 'Who’s allowed to request a subscription of this type through the public “request” action. Leave every box unchecked for no restriction (anyone, including a guest).'|t('qr-payments'),
+                id: 'requestableBy',
+                name: 'requestableBy',
+                options: [{ label: 'Guest'|t('qr-payments'), value: 'guest' }]|merge(
+                    userGroups|map(group => { label: group.name, value: group.uid })
+                ),
+                values: subscriptionType.requestableBy,
+                errors: subscriptionType.getErrors('requestableBy'),
             }) }}
         </div>
     </div>

@@ -36,6 +36,7 @@ trait ServicesTrait {
                 'epcQr' => EpcQrService::class,
                 'payments' => PaymentsService::class,
                 'paymentTypes' => PaymentTypesService::class,
+                'requestTokens' => RequestTokensService::class,
                 'subscriptions' => SubscriptionsService::class,
                 'subscriptionTypes' => SubscriptionTypesService::class,
                 'vite' => [
@@ -93,6 +94,13 @@ trait ServicesTrait {
      */
     public function getPaymentTypes(): PaymentTypesService {
         return $this->get('paymentTypes');
+    }
+
+    /**
+     * @return RequestTokensService
+     */
+    public function getRequestTokens(): RequestTokensService {
+        return $this->get('requestTokens');
     }
 
     /**

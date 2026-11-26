@@ -17,6 +17,7 @@ use craft\elements\conditions\ElementConditionInterface;
 use craft\elements\db\ElementQueryInterface;
 use craft\elements\User;
 use craft\enums\Color;
+use craft\events\DefineHtmlEvent;
 use craft\helpers\App;
 use craft\helpers\Cp;
 use craft\helpers\Db;
@@ -82,6 +83,23 @@ class Subscription extends Element {
     public const string STATUS_ACTIVE = 'active';
     public const string STATUS_EXPIRED = 'expired';
     public const string STATUS_CANCELLED = 'cancelled';
+
+    /**
+     * Virtual only — never a real, persisted `$status` value (so it's
+     * deliberately left out of `statuses()`, which backs Craft's native
+     * status filtering/sources). `getStatus()` returns this for the
+     * `latestFor()` sentinel (a transient, never-saved instance, `id ===
+     * null`) instead of letting its default `$status` (`STATUS_REQUESTED`,
+     * same as any other freshly-constructed `Subscription`) misreport a
+     * user who's never subscribed at all as having one pending.
+     */
+    public const string STATUS_NONE = 'none';
+
+    /**
+     * @event DefineHtmlEvent Fired by `getStatusHtml()` after it's worked
+     * out its own default markup, letting a site override it.
+     */
+    public const string EVENT_DEFINE_STATUS_HTML = 'defineStatusHtml';
 
     private ?FieldLayout $fieldLayout = null;
 
@@ -208,7 +226,7 @@ class Subscription extends Element {
      */
     public static function statuses(): array {
         return [
-            self::STATUS_REQUESTED => ['label' => Craft::t('qr-payments', 'Requested'), 'color' => Color::Blue],
+            self::STATUS_REQUESTED => ['label' => Craft::t('qr-payments', 'Requested'), 'color' => Color::Orange],
             self::STATUS_ACTIVE => ['label' => Craft::t('qr-payments', 'Active'), 'color' => Color::Green],
             self::STATUS_EXPIRED => ['label' => Craft::t('qr-payments', 'Expired'), 'color' => Color::Red],
             self::STATUS_CANCELLED => ['label' => Craft::t('qr-payments', 'Cancelled'), 'color' => Color::Gray],
@@ -229,9 +247,18 @@ class Subscription extends Element {
      * payment" column already shows that payment as expired); this is
      * about a subscription that *was* active falling behind.
      *
+     * Also where the `latestFor()` sentinel gets caught: a transient,
+     * never-saved instance (`id === null`) reads back as `STATUS_NONE`
+     * rather than its default `$status` (`STATUS_REQUESTED`), so a
+     * template can safely branch on `getStatus()` alone — no separate
+     * `id` guard needed, the way `isValid()`/`isPending()` used to need
+     * one of their own.
+     *
      * @return string|null
      */
     public function getStatus(): ?string {
+        if ($this->id === null) return self::STATUS_NONE;
+
         if ($this->getIsDraft() || $this->archived) return parent::getStatus();
 
         if ($this->status === self::STATUS_ACTIVE && $this->isPastDue()) {
@@ -303,6 +330,106 @@ class Subscription extends Element {
         if ($latestPaidPayment === null || $latestPaidPayment->dueDate === null) return null;
 
         return SubscriptionType::addInterval($latestPaidPayment->dueDate, $type->interval);
+    }
+
+    /**
+     * `$user`'s own most recent `Subscription` of `$type`, whatever its
+     * status — the entry point for `QrPaymentsVariable::subscription()`,
+     * so a template can chain `getStatus()`/`validUntil()` straight off
+     * the result instead of asking separate user+type-keyed questions.
+     * Not filtered to `requested`/`active`: an older `cancelled`/`expired`
+     * one is harmless to return, since a template still falls through to
+     * the same "nothing outstanding" branch either way.
+     *
+     * Never returns `null` — a user with no matching subscription at all
+     * (including a guest, `$user === null`) gets a transient, never-saved
+     * instance back (`id` stays `null`) instead, so a template can call
+     * straight into `getStatus()`/`validUntil()` with no guard of its
+     * own. A template still needs to check `id` before trusting
+     * `getStatus()` as "outstanding," though — the blank instance's own
+     * default `$status` (`STATUS_REQUESTED`, same as any other
+     * freshly-constructed `Subscription` before its first real save)
+     * would otherwise misreport this sentinel as `requested`.
+     *
+     * @param User|null $user Null (a guest) never has one.
+     * @param SubscriptionType $type
+     * @return self
+     */
+    public static function latestFor(?User $user, SubscriptionType $type): self {
+        $subscription = $user !== null
+            ? self::find()
+                ->userId($user->id)
+                ->subscriptionTypeId($type->id)
+                ->status(null)
+                ->orderBy(['id' => SORT_DESC])
+                ->one()
+            : null;
+
+        return $subscription ?? new self();
+    }
+
+    /**
+     * The date through which this subscription is paid up — an alias
+     * for `getCoverageEnd()`, named to read naturally alongside a
+     * `getStatus()` check from a template: `subscription.validUntil()`.
+     * Already safe on the `latestFor()` sentinel without any extra
+     * check: `getCoverageEnd()` has its own `$this->id === null` guard.
+     *
+     * @return DateTime|null
+     */
+    public function validUntil(): ?DateTime {
+        return $this->getCoverageEnd();
+    }
+
+    /**
+     * One ready-to-render `<div class="[status]">...</div>` for whatever
+     * checking `getStatus()` directly would otherwise take several
+     * separate comparisons to turn into copy — e.g.
+     * `<div class="active">Valid subscription (12 days left)</div>`,
+     * `<div class="none">No subscription</div>`. Safe on the `latestFor()`
+     * sentinel (a `null` `id` always reads as `none`/`"No subscription"`),
+     * and safe under `strict_variables`. A raw `cancelled` subscription reads back as
+     * `none`/`"No subscription"` too — it's not a status a subscriber
+     * should ever see as its own thing, just the end of one.
+     *
+     * This plugin's own markup and wording are unlikely to fit every site
+     * as-is — listen for `EVENT_DEFINE_STATUS_HTML` and set `$event->html`
+     * to override either, rather than forking this method.
+     *
+     * @return string
+     */
+    public function getStatusHtml(): string {
+        $event = new DefineHtmlEvent(['html' => $this->defaultStatusHtml()]);
+
+        if ($this->hasEventHandlers(self::EVENT_DEFINE_STATUS_HTML)) {
+            $this->trigger(self::EVENT_DEFINE_STATUS_HTML, $event);
+        }
+
+        return $event->html;
+    }
+
+    /**
+     * @return string
+     */
+    private function defaultStatusHtml(): string {
+        $status = $this->getStatus() ?? self::STATUS_NONE;
+
+        // `cancelled` folds into `none` here too — same reasoning as the
+        // `latestFor()` sentinel `getStatus()` itself already covers:
+        // not a status a subscriber should ever see as its own thing,
+        // just the end of one.
+        if ($status === self::STATUS_CANCELLED) $status = self::STATUS_NONE;
+
+        $text = match ($status) {
+            self::STATUS_REQUESTED => Craft::t('qr-payments', 'Subscription requested'),
+            self::STATUS_ACTIVE => Craft::t('qr-payments', 'Active subscription ({duration})', [
+                'duration' => HumanDuration::until($this->getCoverageEnd()),
+            ]),
+            self::STATUS_EXPIRED => Craft::t('qr-payments', 'Subscription expired'),
+            default => Craft::t('qr-payments', 'No subscription'),
+        };
+
+        return Html::tag('div', Html::encode($text), ['class' => $status]);
     }
 
     /**
@@ -702,6 +829,7 @@ class Subscription extends Element {
 
             [['subscriptionTypeId'], 'integer'],
             [['subscriptionTypeId'], 'validateSubscriptionTypeExists'],
+            [['subscriptionTypeId'], 'validateNotDuplicate', 'on' => [self::SCENARIO_DEFAULT, self::SCENARIO_LIVE]],
 
             [['status'], 'in', 'range' => array_keys(self::statuses())],
 
@@ -735,6 +863,38 @@ class Subscription extends Element {
 
         if (QrPayments::getInstance()->getSubscriptionTypes()->getSubscriptionTypeById($id) === null) {
             $this->addError($attribute, Craft::t('qr-payments', 'Could not find the selected subscription type.'));
+        }
+    }
+
+    /**
+     * Backstop for `SubscriptionsService::requestSubscription()`'s own
+     * early check (see `SubscriptionsService::hasOutstandingSubscription()`)
+     * — enforced here too so no other save path (the CP's native "New
+     * subscription" draft flow, a future import, directly editing
+     * `userId`/`subscriptionTypeId` on an existing subscription) can
+     * create a second `requested`/`active` subscription of the same type
+     * for the same subscriber. A no-op while this subscription's own
+     * status isn't itself `requested`/`active` — e.g. saving one as
+     * `cancelled` can never collide, regardless of what else exists.
+     *
+     * @param string $attribute
+     * @return void
+     */
+    public function validateNotDuplicate(string $attribute): void {
+        if (!\in_array($this->status, [self::STATUS_REQUESTED, self::STATUS_ACTIVE], true)) return;
+
+        $type = $this->getSubscriptionType();
+        if ($type === null) return;
+
+        $hasOutstanding = QrPayments::getInstance()->getSubscriptions()->hasOutstandingSubscription(
+            $type,
+            $this->userId,
+            $this->email,
+            excludeId: $this->id,
+        );
+
+        if ($hasOutstanding) {
+            $this->addError($attribute, Craft::t('qr-payments', 'Already has a requested or active subscription of this type.'));
         }
     }
 

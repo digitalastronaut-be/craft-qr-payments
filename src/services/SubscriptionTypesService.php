@@ -14,6 +14,8 @@ namespace digitalastronaut\craftqrpayments\services;
 use Craft;
 use craft\base\Component;
 use craft\db\Query;
+use craft\elements\User;
+use craft\helpers\Json;
 use craft\helpers\MoneyHelper;
 use craft\helpers\StringHelper;
 
@@ -38,7 +40,16 @@ class SubscriptionTypesService extends Component {
 
         $rows = $this->createSubscriptionTypeQuery()->all();
 
-        return $this->_subscriptionTypes = array_map(static fn(array $row) => new SubscriptionType($row), $rows);
+        return $this->_subscriptionTypes = array_map(static function(array $row) {
+            // a plain Query (unlike ActiveRecord) doesn't auto-decode a json
+            // column — it comes back as the raw JSON string, same as
+            // `PaymentTypesService::getAllPaymentTypes()` handles.
+            $row['requestableBy'] = $row['requestableBy'] !== null
+                ? (Json::decode($row['requestableBy']) ?: [])
+                : [];
+
+            return new SubscriptionType($row);
+        }, $rows);
     }
 
     /**
@@ -66,6 +77,20 @@ class SubscriptionTypesService extends Component {
     }
 
     /**
+     * The generic replacement for a site's own "which type applies to
+     * this user" lookup — filters every type by `isRequestableBy()`.
+     *
+     * @param User|null $user
+     * @return SubscriptionType[]
+     */
+    public function getRequestableTypesFor(?User $user): array {
+        return array_values(array_filter(
+            $this->getAllSubscriptionTypes(),
+            static fn(SubscriptionType $type) => $type->isRequestableBy($user),
+        ));
+    }
+
+    /**
      * @param SubscriptionType $subscriptionType
      * @param bool $runValidation
      * @return bool False if validation failed.
@@ -78,6 +103,7 @@ class SubscriptionTypesService extends Component {
             'handle' => $subscriptionType->handle,
             'paymentTypeId' => $subscriptionType->paymentTypeId,
             'amount' => MoneyHelper::toDecimal($subscriptionType->getAmount()) ?: null,
+            'requestableBy' => $subscriptionType->requestableBy,
             'interval' => $subscriptionType->interval,
             'subscriptionRequestedTemplate' => $subscriptionType->subscriptionRequestedTemplate,
             'subscriptionCancelledTemplate' => $subscriptionType->subscriptionCancelledTemplate,
@@ -139,7 +165,7 @@ class SubscriptionTypesService extends Component {
     private function createSubscriptionTypeQuery(): Query {
         return (new Query())
             ->select([
-                'id', 'uid', 'name', 'handle', 'paymentTypeId', 'amount', 'interval',
+                'id', 'uid', 'name', 'handle', 'paymentTypeId', 'amount', 'requestableBy', 'interval',
                 'subscriptionRequestedTemplate', 'subscriptionCancelledTemplate', 'subscriptionExpiredTemplate',
                 'subscriptionActivatedTemplate', 'subscriptionExpiringTemplate',
             ])

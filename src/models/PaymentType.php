@@ -27,6 +27,7 @@ use digitalastronaut\craftqrpayments\helpers\Table;
 use digitalastronaut\craftqrpayments\QrPayments;
 
 use InvalidArgumentException;
+use Money\Money;
 
 /**
  * Class PaymentType
@@ -55,6 +56,25 @@ class PaymentType extends Model implements Chippable, CpEditable {
 
     public string $name = '';
     public string $handle = '';
+
+    /**
+     * @var Money|null The fixed price of every `Payment` of this type —
+     * null means "variable, the caller supplies an amount" (e.g. the
+     * hashed `amount` `PaymentsController::actionRequest()` otherwise
+     * requires). Set, a request for this type needs no amount at all —
+     * see `actionRequest()`. Unlike `SubscriptionType::$amount`, nullable:
+     * most existing payment types are the variable kind.
+     */
+    private ?Money $_amount = null;
+
+    /**
+     * @var string[] Who's allowed to request a `Payment` of this type
+     * through `PaymentsController::actionRequest()` — each entry is
+     * either the literal `"guest"`, or a user group's `uid`. Empty means
+     * unrestricted (anyone, including a guest) — see `isRequestableBy()`.
+     */
+    public array $requestableBy = [];
+
     public ?int $fieldLayoutId = null;
     public ?int $defaultDueDateDays = 30;
 
@@ -173,6 +193,37 @@ class PaymentType extends Model implements Chippable, CpEditable {
     }
 
     /**
+     * @return Money|null
+     */
+    public function getAmount(): ?Money {
+        return $this->_amount;
+    }
+
+    /**
+     * @param Money|array|string|int|float|null $value
+     * @return void
+     */
+    public function setAmount(Money|array|string|int|float|null $value): void {
+        $this->_amount = Payment::parseMoney($value);
+    }
+
+    /**
+     * Whether `$user` (or a guest, when null) is allowed to request a
+     * `Payment` of this type through `PaymentsController::actionRequest()`.
+     *
+     * @param User|null $user
+     * @return bool
+     */
+    public function isRequestableBy(?User $user): bool {
+        if (empty($this->requestableBy)) return true;
+        if ($user === null) return \in_array('guest', $this->requestableBy, true);
+
+        $groupUids = array_map(static fn($group) => $group->uid, $user->getGroups());
+
+        return (bool) array_intersect($this->requestableBy, $groupUids);
+    }
+
+    /**
      * @inheritdoc
      */
     public static function get(string|int $id): ?static {
@@ -222,11 +273,15 @@ class PaymentType extends Model implements Chippable, CpEditable {
             [['beneficiaryName', 'iban'], 'validateEnvVarResolves'],
             [['iban'], 'validateIbanValue'],
 
+            [['amount'], 'validateAmount'],
+
             [['referencePrefix'], 'string', 'max' => 26],
             [['payTemplate', 'paymentCreatedTemplate', 'paymentStatusChangedTemplate', 'paymentsSummaryTemplate', 'paymentReminderTemplate'], 'string'],
             [['payTemplate', 'paymentCreatedTemplate', 'paymentStatusChangedTemplate', 'paymentsSummaryTemplate', 'paymentReminderTemplate'], 'validateTemplateExists'],
 
             [['reminderRecipients'], 'validateReminderRecipients'],
+
+            [['requestableBy'], 'validateRequestableBy'],
         ]);
     }
 
@@ -243,6 +298,24 @@ class PaymentType extends Model implements Chippable, CpEditable {
 
         if ($query->exists()) {
             $this->addError($attribute, Craft::t('qr-payments', 'This handle is already in use.'));
+        }
+    }
+
+    /**
+     * Unlike `SubscriptionType::validateAmount()`, a null amount is
+     * valid here — it's what makes this type the "variable, caller
+     * supplies one" kind (see `$_amount`'s docblock).
+     *
+     * @param string $attribute
+     * @return void
+     */
+    public function validateAmount(string $attribute): void {
+        $amount = $this->$attribute;
+
+        if ($amount === null) return;
+
+        if (!$amount->isPositive()) {
+            $this->addError($attribute, Craft::t('qr-payments', 'Amount must be greater than zero.'));
         }
     }
 
@@ -307,6 +380,21 @@ class PaymentType extends Model implements Chippable, CpEditable {
 
         if ((int) User::find()->id($ids)->status(null)->count() !== count(array_unique($ids))) {
             $this->addError($attribute, Craft::t('qr-payments', 'One or more selected recipients could not be found.'));
+        }
+    }
+
+    /**
+     * @param string $attribute
+     * @return void
+     */
+    public function validateRequestableBy(string $attribute): void {
+        foreach ($this->$attribute as $value) {
+            if ($value === 'guest') continue;
+
+            if (Craft::$app->getUserGroups()->getGroupByUid($value) === null) {
+                $this->addError($attribute, Craft::t('qr-payments', 'One or more selected groups could not be found.'));
+                return;
+            }
         }
     }
 

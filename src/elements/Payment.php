@@ -18,6 +18,7 @@ use craft\db\Query;
 use craft\elements\conditions\ElementConditionInterface;
 use craft\elements\db\ElementQueryInterface;
 use craft\enums\Color;
+use craft\events\DefineHtmlEvent;
 use craft\helpers\App;
 use craft\helpers\Cp;
 use craft\helpers\Db;
@@ -80,6 +81,12 @@ class Payment extends Element {
     public const string HISTORY_TYPE_CANCELLATION = 'cancellation';
 
     public const string CURRENCY = 'EUR';
+
+    /**
+     * @event DefineHtmlEvent Fired by `getStatusHtml()` after it's worked
+     * out its own default markup, letting a site override it.
+     */
+    public const string EVENT_DEFINE_STATUS_HTML = 'defineStatusHtml';
 
     private ?FieldLayout $fieldLayout = null;
 
@@ -392,6 +399,51 @@ class Payment extends Element {
      */
     public function canReportPaidByPayer(): bool {
         return \in_array($this->getStatus(), [self::STATUS_REQUESTED, self::STATUS_PARTIAL], true);
+    }
+
+    /**
+     * One ready-to-render `<div class="[status]">...</div>` for
+     * `getStatus()` — e.g. `<div class="partial">Partially paid</div>`,
+     * `<div class="expired">Payment expired</div>` — same reasoning as
+     * `Subscription::getStatusHtml()`.
+     *
+     * This plugin's own markup and wording are unlikely to fit every site
+     * as-is — listen for `EVENT_DEFINE_STATUS_HTML` and set `$event->html`
+     * to override either, rather than forking this method.
+     *
+     * @return string
+     */
+    public function getStatusHtml(): string {
+        $event = new DefineHtmlEvent(['html' => $this->defaultStatusHtml()]);
+
+        if ($this->hasEventHandlers(self::EVENT_DEFINE_STATUS_HTML)) {
+            $this->trigger(self::EVENT_DEFINE_STATUS_HTML, $event);
+        }
+
+        return $event->html;
+    }
+
+    /**
+     * @return string
+     */
+    private function defaultStatusHtml(): string {
+        $status = $this->getStatus() ?? 'none';
+
+        $text = match ($status) {
+            self::STATUS_REQUESTED => Craft::t('qr-payments', 'Payment requested ({duration} left)', [
+                'duration' => $this->getDueInLabel(),
+            ]),
+            self::STATUS_AWAITING_CONFIRMATION => Craft::t('qr-payments', 'Marked as paid, awaiting confirmation'),
+            self::STATUS_PARTIAL => Craft::t('qr-payments', 'Partially paid'),
+            self::STATUS_PAID => Craft::t('qr-payments', 'Paid'),
+            self::STATUS_OVERPAID => Craft::t('qr-payments', 'Overpaid'),
+            self::STATUS_EXPIRED => Craft::t('qr-payments', 'Payment expired'),
+            self::STATUS_CANCELLED => Craft::t('qr-payments', 'Payment cancelled'),
+            self::STATUS_REFUNDED => Craft::t('qr-payments', 'Refunded'),
+            default => Craft::t('qr-payments', 'No payment'),
+        };
+
+        return Html::tag('div', Html::encode($text), ['class' => $status]);
     }
 
     /**
@@ -1429,8 +1481,9 @@ class Payment extends Element {
     public function afterSave(bool $isNew): void {
         if (!$this->propagating) {
             // Must read the previous status before the upsert below
-            // overwrites it.
-            $this->notifyStatusChange();
+            // overwrites it. The notification itself is sent after the
+            // upsert — see the call near the bottom of this block.
+            $previousStatus = $this->getPreviousStatusFromDb();
 
             Db::upsert(Table::QR_PAYMENTS_PAYMENTS, [
                 'id' => $this->id,
@@ -1479,6 +1532,12 @@ class Payment extends Element {
             // subscription, which needs this one's just-saved status
             // already in the DB, not the in-memory value.
             $this->maybeActivateSubscription();
+
+            // Also after the upsert: the queued job re-fetches this payment
+            // from the DB to build the email, so it needs the new status
+            // already persisted — otherwise both the "previous" and
+            // "current" status labels in the email read as the old status.
+            $this->notifyStatusChange($previousStatus);
         }
 
         parent::afterSave($isNew);
@@ -1518,22 +1577,35 @@ class Payment extends Element {
     }
 
     /**
+     * Reads this payment's status as currently persisted in the DB, i.e.
+     * before whatever's about to be upserted in `afterSave()` overwrites
+     * it. Must be called before that upsert runs.
+     *
+     * @return string|null
+     */
+    private function getPreviousStatusFromDb(): ?string {
+        if ($this->firstSave) return null;
+
+        return (new Query())
+            ->select(['status'])
+            ->from(Table::QR_PAYMENTS_PAYMENTS)
+            ->where(['id' => $this->id])
+            ->scalar() ?: null;
+    }
+
+    /**
      * Uses `$this->firstSave` rather than the generic Craft-level `$isNew`
      * flag passed into `afterSave()`: a payment created through the native
      * draft flow already has an element row (and so an element-level
      * `$isNew = false`) by the time it's actually created — see
      * `beforeSave()` for the full explanation of `firstSave`.
      *
+     * @param string|null $previousStatus As read by `getPreviousStatusFromDb()`
+     *                                    before the upsert in `afterSave()`.
      * @return void
      */
-    private function notifyStatusChange(): void {
+    private function notifyStatusChange(?string $previousStatus): void {
         if ($this->firstSave) return;
-
-        $previousStatus = (new Query())
-            ->select(['status'])
-            ->from(Table::QR_PAYMENTS_PAYMENTS)
-            ->where(['id' => $this->id])
-            ->scalar();
 
         if ($previousStatus === $this->status || !$this->email) return;
 

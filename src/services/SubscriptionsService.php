@@ -20,6 +20,7 @@ use craft\helpers\MoneyHelper;
 use digitalastronaut\craftqrpayments\elements\Payment;
 use digitalastronaut\craftqrpayments\elements\Subscription;
 use digitalastronaut\craftqrpayments\events\SubscriptionEvent;
+use digitalastronaut\craftqrpayments\exceptions\DuplicateSubscriptionException;
 use digitalastronaut\craftqrpayments\jobs\SendSubscriptionActivatedEmailJob;
 use digitalastronaut\craftqrpayments\jobs\SendSubscriptionCancelledEmailJob;
 use digitalastronaut\craftqrpayments\models\SubscriptionType;
@@ -200,11 +201,18 @@ class SubscriptionsService extends Component {
      * @param string $email
      * @param int|null $userId The Craft user this subscription belongs to, when the subscriber has an account. Null for a guest subscriber.
      * @return Payment The subscription's first payment — `$payment->getSubscription()` gets back to the subscription itself.
+     * @throws DuplicateSubscriptionException if the identified subscriber already has a `requested`/`active` subscription of this type — see `hasOutstandingSubscription()`
      * @throws Exception if the subscription or the generated payment fails validation on save
      * @throws InvalidConfigException if `$type`'s `paymentTypeId` doesn't resolve to a real `PaymentType`
      * @throws InvalidArgumentException if the beneficiary/IBAN/BIC settings don't produce a valid EPC payload
      */
     public function requestSubscription(SubscriptionType $type, string $email, ?int $userId = null): Payment {
+        if ($this->hasOutstandingSubscription($type, $userId, $email)) {
+            throw new DuplicateSubscriptionException(Craft::t('qr-payments', 'Already has a requested or active {name} subscription.', [
+                'name' => $type->name,
+            ]));
+        }
+
         $subscription = new Subscription();
         $subscription->subscriptionTypeId = $type->id;
         $subscription->email = $email;
@@ -228,6 +236,49 @@ class SubscriptionsService extends Component {
         }
 
         return $payment;
+    }
+
+    /**
+     * Whether the identified subscriber already has a `requested`/
+     * `active` `Subscription` of `$type` — the one-per-type-per-subscriber
+     * rule `requestSubscription()` enforces ahead of its own save, and
+     * `Subscription::validateNotDuplicate()` enforces again (as a
+     * backstop for every other save path) at the element-validation
+     * level, excluding the subscription being saved itself via
+     * `$excludeId`.
+     *
+     * `$userId` is authoritative when set — never falls back to `$email`
+     * in that case, since a logged-in requester can submit any `email`
+     * in the form independent of their account's real address (see
+     * `Subscription`'s own "email is a guest-contact snapshot, not an
+     * identity" distinction) — so keying off it instead would let the
+     * same person bypass this just by varying what they type in.
+     * `$email` is compared case-insensitively (`SubscriptionQuery`'s own
+     * `email()` criteria does this), same as Craft's own `User` element
+     * compares email for uniqueness.
+     *
+     * @param SubscriptionType $type
+     * @param int|null $userId
+     * @param string $email
+     * @param int|null $excludeId A subscription id to exclude from the check — the one currently being saved, when called from `Subscription::validateNotDuplicate()`.
+     * @return bool
+     */
+    public function hasOutstandingSubscription(SubscriptionType $type, ?int $userId, string $email, ?int $excludeId = null): bool {
+        $query = Subscription::find()
+            ->subscriptionTypeId($type->id)
+            ->status([Subscription::STATUS_REQUESTED, Subscription::STATUS_ACTIVE]);
+
+        if ($excludeId !== null) $query->id(['not', $excludeId]);
+
+        if ($userId !== null) {
+            $query->userId($userId);
+        } elseif ($email !== '') {
+            $query->email($email);
+        } else {
+            return false;
+        }
+
+        return $query->exists();
     }
 
     /**

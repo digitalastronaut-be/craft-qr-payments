@@ -4,7 +4,6 @@
 {% set status = payment.getStatus() %}
 {% set actionable = status in ['requested', 'partial'] %}
 
-
 {% set statusCopy = {
     'requested': {
         badge: 'Payment requested'|t('qr-payments'),
@@ -60,6 +59,46 @@
     },
 }[status] %}
 
+{% if actionable %}
+
+    {% set detailRows = [
+        { label: 'Beneficiary:'|t('qr-payments'), value: payment.beneficiaryName },
+        { label: 'IBAN:'|t('qr-payments'), value: payment.iban },
+        payment.bic ? { label: 'BIC:'|t('qr-payments'), value: payment.bic } : null,
+        { label: 'Total price:'|t('qr-payments'), value: payment.amount|money },
+        status == 'partial' ? { label: 'Paid so far:'|t('qr-payments'), value: payment.netPaidAmount|money } : null,
+        status == 'partial' ? { label: 'Remaining:'|t('qr-payments'), value: payment.remainingAmount|money } : null,
+        { label: 'Reference:'|t('qr-payments'), value: payment.remittanceReference },
+        payment.dueDate ? { label: 'Time left to pay:'|t('qr-payments'), value: payment.dueInLabel } : null,
+    ]|filter(row => row is not null) %}
+
+{% elseif status == 'overpaid' %}
+
+    {% set detailRows = [
+        { label: 'Total price:'|t('qr-payments'), value: payment.amount|money },
+        { label: 'Paid:'|t('qr-payments'), value: payment.grossPaidAmount|money },
+        payment.refundedAmount.isPositive() ? { label: 'Refunded so far:'|t('qr-payments'), value: payment.refundedAmount|money } : null,
+        { label: 'Still to be refunded:'|t('qr-payments'), value: payment.overpaidAmount|money },
+        { label: 'Reference:'|t('qr-payments'), value: payment.remittanceReference },
+    ]|filter(row => row is not null) %}
+
+{% elseif status == 'refunded' %}
+
+    {% set detailRows = [
+        { label: 'Paid:'|t('qr-payments'), value: payment.grossPaidAmount|money },
+        { label: 'Refunded:'|t('qr-payments'), value: payment.refundedAmount|money },
+        { label: 'Reference:'|t('qr-payments'), value: payment.remittanceReference },
+    ] %}
+
+{% else %}
+
+    {% set detailRows = [
+        { label: 'Amount:'|t('qr-payments'), value: payment.amount|money },
+        { label: 'Reference:'|t('qr-payments'), value: payment.remittanceReference },
+    ] %}
+
+{% endif %}
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -80,20 +119,9 @@
         <p>{{ 'Or transfer manually using these details:'|t('qr-payments') }}</p>
 
         <ul class="qr-pay__details">
-            <li><strong>{{ 'Beneficiary:'|t('qr-payments') }}</strong> {{ payment.beneficiaryName }}</li>
-            <li><strong>{{ 'IBAN:'|t('qr-payments') }}</strong> {{ payment.iban }}</li>
-            {% if payment.bic %}<li><strong>{{ 'BIC:'|t('qr-payments') }}</strong> {{ payment.bic }}</li>{% endif %}
-            <li><strong>{{ 'Total price:'|t('qr-payments') }}</strong> {{ payment.amount|money }}</li>
-            {% if status == 'partial' %}
-                <li><strong>{{ 'Paid so far:'|t('qr-payments') }}</strong> {{ payment.netPaidAmount|money }}</li>
-                <li><strong>{{ 'Remaining:'|t('qr-payments') }}</strong> {{ payment.remainingAmount|money }}</li>
-            {% endif %}
-            <li><strong>{{ 'Reference:'|t('qr-payments') }}</strong> {{ payment.remittanceReference }}</li>
-            {# A duration ("12 days") rather than the raw `dueDate` — unlike
-               a static email, this page is rendered fresh on every visit,
-               so it can show something more immediately useful than a date
-               the payer would have to do the subtraction on themselves. #}
-            {% if payment.dueDate %}<li><strong>{{ 'Time left to pay:'|t('qr-payments') }}</strong> {{ payment.dueInLabel }}</li>{% endif %}
+            {% for row in detailRows %}
+                <li><strong>{{ row.label }}</strong> {{ row.value }}</li>
+            {% endfor %}
         </ul>
 
         {% if payment.canReportPaidByPayer() %}
@@ -107,20 +135,9 @@
         {% endif %}
     {% else %}
         <ul class="qr-pay__details qr-pay__details--summary">
-            {% if status == 'overpaid' %}
-                <li><strong>{{ 'Total price:'|t('qr-payments') }}</strong> {{ payment.amount|money }}</li>
-                <li><strong>{{ 'Paid:'|t('qr-payments') }}</strong> {{ payment.grossPaidAmount|money }}</li>
-                {% if payment.refundedAmount.isPositive() %}
-                    <li><strong>{{ 'Refunded so far:'|t('qr-payments') }}</strong> {{ payment.refundedAmount|money }}</li>
-                {% endif %}
-                <li><strong>{{ 'Still to be refunded:'|t('qr-payments') }}</strong> {{ payment.overpaidAmount|money }}</li>
-            {% elseif status == 'refunded' %}
-                <li><strong>{{ 'Paid:'|t('qr-payments') }}</strong> {{ payment.grossPaidAmount|money }}</li>
-                <li><strong>{{ 'Refunded:'|t('qr-payments') }}</strong> {{ payment.refundedAmount|money }}</li>
-            {% else %}
-                <li><strong>{{ 'Amount:'|t('qr-payments') }}</strong> {{ payment.amount|money }}</li>
-            {% endif %}
-            <li><strong>{{ 'Reference:'|t('qr-payments') }}</strong> {{ payment.remittanceReference }}</li>
+            {% for row in detailRows %}
+                <li><strong>{{ row.label }}</strong> {{ row.value }}</li>
+            {% endfor %}
         </ul>
     {% endif %}
 </body>

@@ -80,6 +80,7 @@ class SubscriptionTypesController extends Controller {
             'subscriptionType' => $subscriptionType,
             'isNew' => $subscriptionType->id === null,
             'paymentTypes' => QrPayments::getInstance()->getPaymentTypes()->getAllPaymentTypes(),
+            'userGroups' => Craft::$app->getUserGroups()->getAllGroups(),
         ]);
     }
 
@@ -145,6 +146,15 @@ class SubscriptionTypesController extends Controller {
         $subscriptionType->subscriptionExpiredTemplate = $this->request->getBodyParam('subscriptionExpiredTemplate', '');
         $subscriptionType->subscriptionActivatedTemplate = $this->request->getBodyParam('subscriptionActivatedTemplate', '');
         $subscriptionType->subscriptionExpiringTemplate = $this->request->getBodyParam('subscriptionExpiringTemplate', '');
+
+        // `checkboxSelectField` posts a plain-string placeholder when
+        // nothing's checked, so "nothing selected" can be told apart
+        // from "field not submitted" — same quirk `PaymentTypesController::
+        // actionSave()` handles for its own `reminderRecipients`/`requestableBy`.
+        $requestableBy = $this->request->getBodyParam('requestableBy', []);
+        $subscriptionType->requestableBy = is_array($requestableBy)
+            ? $requestableBy
+            : ($requestableBy === '' ? [] : (array) $requestableBy);
 
         if (!$subscriptionTypes->saveSubscriptionType($subscriptionType)) {
             $this->setFailFlash(Craft::t('qr-payments', 'Couldn’t save subscription type.'));

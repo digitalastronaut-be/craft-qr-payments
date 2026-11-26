@@ -11,7 +11,7 @@
 {% set selectedSettingsNavItem = 'paymentTypes' %}
 
 
-{% set generalTabAttributes = ['name', 'handle', 'defaultDueDateDays', 'referencePrefix'] %}
+{% set generalTabAttributes = ['name', 'handle', 'amount', 'requestableBy', 'defaultDueDateDays', 'referencePrefix'] %}
 {% set beneficiaryTabAttributes = ['beneficiaryName', 'iban', 'bic'] %}
 {% set paymentTemplateTabAttributes = ['payTemplate'] %}
 {% set emailsTabAttributes = ['reminderRecipients', 'paymentCreatedTemplate', 'paymentStatusChangedTemplate', 'paymentsSummaryTemplate', 'paymentReminderTemplate'] %}
@@ -82,6 +82,29 @@
                 value: paymentType.referencePrefix,
                 errors: paymentType.getErrors('referencePrefix'),
                 placeholder: 'PAY',
+            }) }}
+
+            {{ forms.moneyField({
+                label: 'Fixed amount'|t('qr-payments'),
+                instructions: 'A fixed price for every payment of this type. Leave blank for a variable amount supplied by whoever creates the payment.'|t('qr-payments'),
+                id: 'amount',
+                name: 'amount',
+                currency: 'EUR',
+                currencyLabel: '(EUR) €',
+                value: paymentType.getAmount() ? paymentType.getAmount().getAmount() / 100 : null,
+                errors: paymentType.getErrors('amount'),
+            }) }}
+
+            {{ forms.checkboxSelectField({
+                label: 'Who can request this'|t('qr-payments'),
+                instructions: 'Who’s allowed to request a payment of this type through the public “request” action. Leave every box unchecked for no restriction (anyone, including a guest).'|t('qr-payments'),
+                id: 'requestableBy',
+                name: 'requestableBy',
+                options: [{ label: 'Guest'|t('qr-payments'), value: 'guest' }]|merge(
+                    userGroups|map(group => { label: group.name, value: group.uid })
+                ),
+                values: paymentType.requestableBy,
+                errors: paymentType.getErrors('requestableBy'),
             }) }}
         </div>
 
@@ -167,7 +190,7 @@
             }) }}
 
             <div class="qrp-email-preview">
-                <iframe class="qrp-email-preview-frame" data-qrp-pay-preview-frame sandbox="allow-same-origin" title="{{ 'Pay page preview'|t('qr-payments') }}" src="{{ actionUrl('qr-payments/payment-types/preview-pay-page', {status: defaultStatus}|merge(paymentType.payTemplate ? {template: paymentType.payTemplate} : {})) }}"></iframe>
+                <iframe class="qrp-email-preview-frame" data-qrp-pay-preview-frame sandbox="allow-same-origin allow-scripts" title="{{ 'Pay page preview'|t('qr-payments') }}" src="{{ actionUrl('qr-payments/payment-types/preview-pay-page', {status: defaultStatus}|merge(paymentType.payTemplate ? {template: paymentType.payTemplate} : {})) }}"></iframe>
             </div>
         </div>
     </div>
@@ -227,6 +250,12 @@
             } only %}
         </div>
     </div>
+
+    {% css %}
+    [data-qrp-pay-preview-frame] {
+        min-height: 800px;
+    }
+    {% endcss %}
 
     {% js %}
     (() => {
@@ -294,8 +323,7 @@
         // height, so a short status message doesn't leave dead space and
         // a long one doesn't create a scrollbar nested inside the CP's
         // own page scroll. Reading `contentDocument` needs
-        // `allow-same-origin` on the iframe's `sandbox` — still no
-        // `allow-scripts`, so nothing inside the preview can actually run.
+        // `allow-same-origin` on the iframe's `sandbox`.
         const resizeFrame = (frame) => {
             try {
                 const doc = frame.contentDocument;

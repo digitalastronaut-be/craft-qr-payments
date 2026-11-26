@@ -13,12 +13,15 @@ namespace digitalastronaut\craftqrpayments\controllers;
 
 use Craft;
 use craft\elements\User;
+use craft\helpers\MoneyHelper;
 use craft\helpers\UrlHelper;
 use craft\web\Controller;
 use craft\web\Response;
 use craft\web\View;
 
 use digitalastronaut\craftqrpayments\elements\Payment;
+use digitalastronaut\craftqrpayments\events\RequestPaymentEvent;
+use digitalastronaut\craftqrpayments\models\PaymentType;
 use digitalastronaut\craftqrpayments\QrPayments;
 use digitalastronaut\craftqrpayments\web\assets\frontend\FrontendAssetBundle;
 
@@ -35,6 +38,13 @@ use yii\web\NotFoundHttpException;
  * @since       v1.0.0-beta
  */
 class PaymentsController extends Controller {
+    /**
+     * Fired by `actionRequest()` before a payment is created, so
+     * site-level code can enforce its own eligibility rules — see
+     * `RequestPaymentEvent`.
+     */
+    public const string EVENT_BEFORE_REQUEST_PAYMENT = 'beforeRequestPayment';
+
     public $defaultAction = 'index';
     protected array|int|bool $allowAnonymous = ['request', 'pay', 'report-paid'];
 
@@ -144,21 +154,47 @@ class PaymentsController extends Controller {
     }
 
     /**
+     * Creates a one-off `Payment` for the posted type/amount/email, either
+     * for whoever's logged in (or a guest), or — via an optional signed
+     * `payer` token (see `RequestTokensService`) — on behalf of someone
+     * else entirely, as a site decides to issue one.
+     *
      * @return Response|null
      */
     public function actionRequest(): ?Response {
         $this->requirePostRequest();
 
-        $amount = $this->hashedAmountFromRequest();
+        $token = $this->resolveRequestToken();
+        if ($token === false) return $this->asFailure(Craft::t('qr-payments', 'This request has expired. Please try again.'));
+
+        $type = $this->resolveRequestedPaymentType($token);
+        if ($type === null) return $this->asFailure(Craft::t('qr-payments', 'Invalid payment type.'));
+
+        $userId = $token['userId'] ?? Craft::$app->getUser()->getIdentity()?->id;
+        $user = $userId !== null ? Craft::$app->getUsers()->getUserById($userId) : null;
+
+        if (!$type->isRequestableBy($user)) {
+            return $this->asFailure(Craft::t('qr-payments', 'This payment type isn’t available to you.'));
+        }
+
+        $amount = $type->getAmount() !== null
+            ? (float) MoneyHelper::toDecimal($type->getAmount())
+            : $this->hashedAmountFromRequest();
         if ($amount === null) return $this->asFailure(Craft::t('qr-payments', 'Invalid amount.'));
 
         $email = $this->request->getBodyParam('email', '');
         if (!$email) return $this->asFailure(Craft::t('qr-payments', 'Email is required.'));
 
+        $event = new RequestPaymentEvent(['userId' => $userId, 'email' => $email, 'paymentType' => $type]);
+
+        if ($this->hasEventHandlers(self::EVENT_BEFORE_REQUEST_PAYMENT)) $this->trigger(self::EVENT_BEFORE_REQUEST_PAYMENT, $event);
+        if (!$event->isValid) return $this->asFailure($event->error ?? Craft::t('qr-payments', 'Could not create the payment.'));
+
         try {
-            $type = QrPayments::getInstance()->getPaymentTypes()->getDefaultPaymentType();
-            $userId = Craft::$app->getUser()->getIdentity()?->id;
-            $payment = QrPayments::getInstance()->getPayments()->createPayment($type, $amount, $email, userId: $userId);
+            $payment = QrPayments::getInstance()
+                ->getPayments()
+                ->createPayment($type, $amount, $email, userId: $userId);
+
         } catch (Throwable $error) {
             Craft::error($error->getMessage(), __METHOD__);
 
@@ -167,7 +203,48 @@ class PaymentsController extends Controller {
 
         $route = QrPayments::getInstance()->getSettings()->paymentRoute;
 
-        return $this->redirect(UrlHelper::siteUrl("{$route}/{$payment->uid}/pay"));
+        return $this->asSuccess(
+            Craft::t('qr-payments', 'Payment created.'),
+            redirect: UrlHelper::siteUrl("{$route}/{$payment->uid}/pay"),
+        );
+    }
+
+    /**
+     * @return array{userId: int|null, typeHandle: string}|false|null The
+     * resolved token, `false` if a `payer` param was posted but didn't
+     * check out (bad signature or expired), or `null` if none was posted
+     * at all.
+     */
+    private function resolveRequestToken(): array|false|null {
+        $raw = (string) $this->request->getBodyParam('payer', '');
+        if ($raw === '') return null;
+
+        return QrPayments::getInstance()
+            ->getRequestTokens()
+            ->resolve($raw) ?? false;
+    }
+
+    /**
+     * Resolves which `PaymentType` this request is for: the token's own
+     * type handle when there is one (it supersedes a plain `typeHandle`
+     * body param — the token, once present, is authoritative), else a
+     * plain `typeHandle` body param, else `getDefaultPaymentType()` —
+     * today's behavior, unchanged for every existing caller that posts
+     * neither.
+     *
+     * @param array{userId: int|null, typeHandle: string}|null $token
+     * @return PaymentType|null
+     */
+    private function resolveRequestedPaymentType(?array $token): ?PaymentType {
+        if ($token !== null) return QrPayments::getInstance()
+            ->getPaymentTypes()
+            ->getPaymentTypeByHandle($token['typeHandle']);
+
+        $handle = (string) $this->request->getBodyParam('typeHandle', '');
+
+        return $handle !== ''
+            ? QrPayments::getInstance()->getPaymentTypes()->getPaymentTypeByHandle($handle)
+            : QrPayments::getInstance()->getPaymentTypes()->getDefaultPaymentType();
     }
 
     /**
@@ -218,9 +295,6 @@ class PaymentsController extends Controller {
      * @return array{0: string, 1: array, 2: string}
      */
     private function payTemplateVariables(Payment $payment): array {
-        Craft::$app->view->registerAssetBundle(FrontendAssetBundle::class);
-        QrPayments::getInstance()->getVite()->register('src/web/assets/frontend/frontend.js');
-
         $variables = [
             'payment' => $payment,
             'qrCodeDataUri' => $payment->getPayableQrCodeDataUri(),
@@ -229,6 +303,12 @@ class PaymentsController extends Controller {
         $override = $payment->getType()->payTemplate;
 
         if ($override !== '') return [$override, $variables, View::TEMPLATE_MODE_SITE];
+
+        // Only the bundled default template wants this bundle's
+        // `html { background-color }` and card styling — a custom
+        // `payTemplate` has its own site layout/look.
+        Craft::$app->view->registerAssetBundle(FrontendAssetBundle::class);
+        QrPayments::getInstance()->getVite()->register('src/web/assets/frontend/frontend.js');
 
         return ['qr-payments/components/_pay.twig', $variables, View::TEMPLATE_MODE_CP];
     }

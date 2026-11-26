@@ -36,7 +36,7 @@ class QrPayments extends Plugin {
     use ServicesTrait;
     use PluginTrait;
 
-    public string $schemaVersion = '1.7.2';
+    public string $schemaVersion = '1.7.4';
     public bool $hasCpSettings = true;
     public bool $hasCpSection = true;
     public bool $hasReadOnlyCpSettings = true;

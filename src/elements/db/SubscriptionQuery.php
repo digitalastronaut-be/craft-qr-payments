@@ -97,7 +97,14 @@ class SubscriptionQuery extends ElementQuery {
         }
 
         if ($this->email !== null) {
-            $this->subQuery->andWhere(Db::parseParam('qr_payments_subscriptions.email', $this->email));
+            // Case-insensitive on purpose — same comparison Craft's own
+            // `User` element uses for its own email uniqueness check —
+            // so `SubscriptionsService::hasOutstandingSubscription()`
+            // can't be bypassed just by varying how an email is cased.
+            $this->subQuery->andWhere(new Expression(
+                'LOWER([[qr_payments_subscriptions.email]]) = LOWER(:qrpEmail)',
+                [':qrpEmail' => $this->email],
+            ));
         }
 
         return parent::beforePrepare();
